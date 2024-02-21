@@ -8,7 +8,7 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message="hide", warning=FALSE,cache=TRUE)
+knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # **Introduction** 
@@ -38,11 +38,8 @@ We surface sterilized *J. nigra* roots following the protocol of [Gottel et al. 
 Loading in the packages required to complete the sequence processing and statistical analyses.
 
 ```{r}
-#Load Packages
 library(dada2)
-library(Biostrings)
-library(ShortRead)
-library(reticulate)
+
 ```
 
 
