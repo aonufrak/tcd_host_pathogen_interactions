@@ -447,6 +447,6 @@ row.names(t.seqtab.tax_its_phloem)<-NULL
 t.seqtab.tax_its_phloem$Row.names<-NULL
 row.names(t.seqtab.tax_its_phloem)<-asvnumber_its_phloem
 
-#write.table(t.seqtab.tax_its_phloem,"/Volumes/control_experiments/phosphojet_and_rootshield_experiments_summer_2020/nursery_summer_2020/phloem_fungi_ornl_jnigrarnaseq_su20_ajo_v2/its.t.seqtab.tax_its_phloem.txt",row.names = TRUE,col.names = TRUE,sep='\t')
+#write.table(t.seqtab.tax_its_phloem,"~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/its.t.seqtab.tax_its_phloem.txt",row.names = TRUE,col.names = TRUE,sep='\t')
 ```
 
