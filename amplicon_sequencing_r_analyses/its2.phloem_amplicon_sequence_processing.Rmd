@@ -339,6 +339,9 @@ Dereplicating reads
 derepforward_its_phloem<-derepFastq(filtforward_its_phloem_no_missing,verbose=TRUE)
 derepreverse_its_phloem<-derepFastq(filtreverse_its_phloem_no_missing,verbose=TRUE)
 
+# Assigning the sample names to the dereplicated sequence objects
+names(derepforward_its_phloem)<-samplenames_its_phloem[grep("AMP|negative",samplenames_its_phloem,invert = TRUE)]
+names(derepreverse_its_phloem)<-samplenames_its_phloem[grep("AMP|negative",samplenames_its_phloem,invert = TRUE)]
 ```
 
 # **Step 8: Denoising with DADA2**
@@ -347,8 +350,8 @@ Now that reads have been quality filtered, error rates have been learned, and re
 
 ```{r, results="hide"}
 #denoise with dada2
-dadaforwardreads_its_phloem<-dada(derepforward_its_phloem,err=errorforward_its_phloem,multithread = TRUE)
-dadareversereads_its_phloem<-dada(derepreverse_its_phloem,err=errorreverse_its_phloem,multithread = TRUE)
+dadaforwardreads_its_phloem<-dada(derepforward_its_phloem,err=errorforward_its_phloem,multithread = TRUE,pool=TRUE)
+dadareversereads_its_phloem<-dada(derepreverse_its_phloem,err=errorreverse_its_phloem,multithread = TRUE,pool=TRUE)
 ```
 
 # **Step 9: Merge Reads and Chimera Removal**
@@ -375,6 +378,7 @@ sum(seqtab.nochim_its_phloem)
 ```
 
 # **Step 10: Taxonomy Assignment**
+
 Assiging taxonomy to sequences from the [UNITE database](https://unite.ut.ee/repository.php) using a modified UNITE database fasta file that includes the ITS2 sequence of *Juglans nigra* [accession MF182372.1](https://www.ncbi.nlm.nih.gov/nuccore/MF182372.1/).
 
 ```{r}
@@ -394,7 +398,7 @@ taxa.na.omit_its_phloem<-taxa.no.plant[-(which(is.na(taxa.no.plant$Phylum))),]
 
 # **Step 11: Taxonomy Merging and ASV Filtering**
 
-The last step is to filter the ASV abundance table by merging the ASV table with the taxonomy assignments. This will remove ASVs from the count table that were not assigned to a fungal phyla or were identified as nematodes or plant sequences. 
+The last step is to filter the ASV abundance table by merging the ASV table with the taxonomy assignments. This will remove ASVs from the count table that were not assigned to a fungal phyla or were identified as plant sequences. 
 
 ```{r}
 # Transposing the ASV table so that taxonomy can be added. 
