@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Background
 Thousand cankers disease (TCD) is caused by the fungal pathogen *Geosmithia morbida* and its insect vector *Pityophthorous juglandis* (walnut twig beetle; WTB). The most susceptible TCD host is *Juglans nigra* (eastern black walnut) an important timber and nut crop native to  portions of the eastern and midwestern U.S. TCD has been detected in 15 U.S. states and portions of Italy.
 
-At this time, the effects of *G. morbida* infection on the  *J. nigra* microbiome are not well understood. Therefore, the **objective of this study was to examine  the effects of *G.moribida* infection on the *J. nigra* root microbiome**. **We expected that the bacterial communities associated with *J. nigra* roots would shift in response to G. morbida infection**. 
+At this time, the effects of *G. morbida* infection on the  *J. nigra* microbiome are not well understood. Therefore, the **objective of this study was to examine  the effects of *G.moribida* infection on the *J. nigra* phloem microbial communities**. **We expected that the fungal communities associated with *J. nigra* phloem tissues would shift in response to G. morbida infection**. 
 
 
 ## **Study Design**
@@ -29,7 +29,7 @@ In the nursery compound at the University of Tennessee Knoxville trees were trea
 Of the 72 trees, 36 trees were inoculated with the fungal pathogen *Geosmithia morbida* isolate TN17 at four separate, equally spaced locations along the stem. This isolate was chosen because it was originally isolated from black walnut in TN and its genome has been sequenced. The remaining 36 trees were inoculated with a potato dextrose agar (PDA) plug to use as an inoculation control. Inoculations took place 7 days following application of Phospho-Jet, Rootshield, and water treatments. On days 14, 28, and 56 post treatment application, trees were destructively sampled with roots and stem tissues sampled for DNA and RNA extraction. 
 
 ## Sample Processing
-We surface sterilized *J. nigra* roots following the protocol of [Gottel et al. 2011](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3165402/) and extracted DNA using a modified CTAB extraction protocol described in [Hoban et al. 2010](https://pubmed.ncbi.nlm.nih.gov/21040046/). Extracted DNA was amplified for the ITS2 region using the primers described in [Cregger et al. 2018](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-018-0413-8) and sequenced on the Illumina MiSeq platform using 2x250 bp chemistry at the [University of Tennessee Genomics Core](https://ceb.utk.edu/dna-sequencing/).
+DNA was extracted from roots using a CTAB method. Amplified for the ITS2 region using the primers described in [Cregger et al. 2018](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-018-0413-8) and sequenced on the Illumina MiSeq platform using 2x250 bp chemistry at the [University of Tennessee Genomics Core](https://ceb.utk.edu/dna-sequencing/).
 
 # Sequence Processing Methodology 
 
@@ -39,7 +39,9 @@ Loading in the packages required to complete the sequence processing and statist
 
 ```{r}
 library(dada2)
-
+library(Biostrings)
+library(ShortRead)
+library(reticulate)
 ```
 
 
@@ -304,9 +306,9 @@ filtforward_its_phloem_no_missing<-filtforward_its_phloem[grep("NTC|negative",fi
 filtreverse_its_phloem_no_missing<-filtreverse_its_phloem[grep("NTC|negative",filtreverse_its_phloem,invert = TRUE)]
 
 # We then generate quality plots for the forward and reverse reads after quality filtering
-filtered_qualplot_fwd_its_phloem<-plotQualityProfile(filtforward_its_phloem_for_qual, aggregate=TRUE)
+filtered_qualplot_fwd_its_phloem<-plotQualityProfile(filtforward_its_phloem_no_missing, aggregate=TRUE)
 filtered_qualplot_fwd_its_phloem
-filtered_qualplot_rev_its_phloem<-plotQualityProfile(filtreverse_its_phloem_for_qual, aggregate=TRUE)
+filtered_qualplot_rev_its_phloem<-plotQualityProfile(filtreverse_its_phloem_no_missing, aggregate=TRUE)
 filtered_qualplot_rev_its_phloem
 ```
 
