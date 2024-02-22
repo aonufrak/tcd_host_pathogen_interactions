@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # **Introduction** 
 
-## Background
+## **Background**
 Thousand cankers disease (TCD) is caused by the fungal pathogen *Geosmithia morbida* and its insect vector *Pityophthorous juglandis* (walnut twig beetle; WTB). The most susceptible TCD host is *Juglans nigra* (eastern black walnut) an important timber and nut crop native to  portions of the eastern and midwestern U.S. TCD has been detected in 15 U.S. states and portions of Italy.
 
 At this time, the effects of *G. morbida* infection on the  *J. nigra* microbiome are not well understood. Therefore, the **objective of this study was to examine  the effects of *G.moribida* infection on the *J. nigra* phloem microbial communities**. **We expected that the fungal communities associated with *J. nigra* phloem tissues would shift in response to G. morbida infection**. 
@@ -28,10 +28,10 @@ In the nursery compound at the University of Tennessee Knoxville trees were trea
 
 Of the 72 trees, 36 trees were inoculated with the fungal pathogen *Geosmithia morbida* isolate TN17 at four separate, equally spaced locations along the stem. This isolate was chosen because it was originally isolated from black walnut in TN and its genome has been sequenced. The remaining 36 trees were inoculated with a potato dextrose agar (PDA) plug to use as an inoculation control. Inoculations took place 7 days following application of Phospho-Jet, Rootshield, and water treatments. On days 14, 28, and 56 post treatment application, trees were destructively sampled with roots and stem tissues sampled for DNA and RNA extraction. 
 
-## Sample Processing
-DNA was extracted from roots using a CTAB method. Amplified for the ITS2 region using the primers described in [Cregger et al. 2018](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-018-0413-8) and sequenced on the Illumina MiSeq platform using 2x250 bp chemistry at the [University of Tennessee Genomics Core](https://ceb.utk.edu/dna-sequencing/).
+## **Sample Processing**
+DNA was extracted from phloem tissues using a CTAB method. Amplified for the ITS2 region using the primers described in [Cregger et al. 2018](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-018-0413-8) and sequenced on the Illumina MiSeq platform using 2x250 bp chemistry at the [University of Tennessee Genomics Core](https://ceb.utk.edu/dna-sequencing/).
 
-# Sequence Processing Methodology 
+# **Sequence Processing Methodology** 
 
 # **Step 1: Load Packages**
 
@@ -73,7 +73,9 @@ initial_reverse_qual<-plotQualityProfile(forwardreads_its_phloem, aggregate=TRUE
 initial_reverse_qual
 ```
 
-# **Step 2: Filtering of Ambiguous Reads** 
+# **Step 3: Filtering of Ambiguous Reads** 
+
+Removing reads with ambiguous bases. 
 
 ```{r}
 # Creating an object  that strips away the pathway information leaving behind only the filename.
@@ -101,8 +103,9 @@ filtn_qualplot_rev_its_phloem<-plotQualityProfile(reverse.filtN_its_phloem, aggr
 filtn_qualplot_rev_its_phloem
 ```
 
+# **Step 4: Primer Removal**
 
-# **Step 3: Primer Removal**
+Removing primers used in the first step of PCR to amplify the ITS2 region. These are low diversity section that will not help with distinguishing between taxa. 
 
 ```{r}
 # Creating strings that contain the forward and reverse primers used in the study.
@@ -261,16 +264,14 @@ primertable_its_phloem_2<-
       archits4.forwaredreads.cut_its_phloem=sapply(archits4.ori,primeroccurences,directory=forwardreads.cut_its_phloem),
       archits4.reversereads.cut_its_phloem=sapply(archits4.ori,primeroccurences,directory=reversereads.cut_its_phloem))
 primertable_its_phloem_2
-```
 
-```{r}
 # Comparing the pre vs post primer detections.
 primertable_its_phloem
 primertable_its_phloem_2
 ```
 
 
-# **Step 4: Quality Filtering**
+# **Step 5: Quality Filtering**
 
 Quality filtering data prior to denoising with dada2. Generating quality plots for the sequences that have had their primers removed and use these quality plots to determine what parameters should be used to filter sequences. 
 
@@ -312,7 +313,7 @@ filtered_qualplot_rev_its_phloem<-plotQualityProfile(filtreverse_its_phloem_no_m
 filtered_qualplot_rev_its_phloem
 ```
 
-# **Step 5: Learn Error Rates**
+# **Step 6: Learn Error Rates**
 
 Learning the error rates of the data 
 
@@ -329,7 +330,7 @@ errplots_rev_its_phloem
 
 ```
 
-# **Step 6: Dereplication**
+# **Step 7: Dereplication**
 
 Dereplicating reads
 
@@ -340,7 +341,7 @@ derepreverse_its_phloem<-derepFastq(filtreverse_its_phloem_no_missing,verbose=TR
 
 ```
 
-# **Step 7: Denoising with DADA2**
+# **Step 8: Denoising with DADA2**
 
 Now that reads have been quality filtered, error rates have been learned, and reads are dereplicated, proceeding to the sequence inference step of the dada2 pipeline.
 
@@ -350,9 +351,9 @@ dadaforwardreads_its_phloem<-dada(derepforward_its_phloem,err=errorforward_its_p
 dadareversereads_its_phloem<-dada(derepreverse_its_phloem,err=errorreverse_its_phloem,multithread = TRUE)
 ```
 
-# **Step 8: Merge Reads and Chimera Removal**
+# **Step 9: Merge Reads and Chimera Removal**
 
-Mergin reads and removing chimeric sequences
+Merging reads and removing chimeric sequences
 
 ```{r, results="hide"}
 # First forward and reverse reads are merged using mergePairs. 
@@ -364,13 +365,7 @@ hist(nchar(colnames(seqtab_its_phloem)))
 
 # I then remove chimeras using the removeBimeraDenovo function.
 seqtab.nochim_its_phloem<-removeBimeraDenovo(seqtab_its_phloem,method="consensus", multithread=TRUE, verbose=TRUE)
-```
 
-# **DADA2 Assessment**
-
-Determining number of sequences and ASVs present following dada2 pipeline. 
-
-```{r}
 #Number of ASVs in the study
 ncol((seqtab.nochim_its_phloem))
 nrow(seqtab.nochim_its_phloem)
@@ -379,7 +374,7 @@ nrow(seqtab.nochim_its_phloem)
 sum(seqtab.nochim_its_phloem)
 ```
 
-## **Step 9: Taxonomy Assignment**
+# **Step 10: Taxonomy Assignment**
 Assiging taxonomy to sequences from the [UNITE database](https://unite.ut.ee/repository.php) using a modified UNITE database fasta file that includes the ITS2 sequence of *Juglans nigra* [accession MF182372.1](https://www.ncbi.nlm.nih.gov/nuccore/MF182372.1/).
 
 ```{r}
@@ -397,7 +392,7 @@ taxa.na.omit_its_phloem<-taxa.no.plant[-(which(is.na(taxa.no.plant$Phylum))),]
 
 ```
 
-# **Step 10: Taxonomy Merging and ASV Filtering**
+# **Step 11: Taxonomy Merging and ASV Filtering**
 
 The last step is to filter the ASV abundance table by merging the ASV table with the taxonomy assignments. This will remove ASVs from the count table that were not assigned to a fungal phyla or were identified as nematodes or plant sequences. 
 
@@ -431,8 +426,12 @@ geosmithia.seqs.table<-t.seqtab.tax_its_phloem[grep("Geosmithia",t.seqtab.tax_it
 # Pulling out ASV labels and sequences
 geosmithia.seqs<-geosmithia.seqs.table[,1,drop=FALSE]
 
-#write.table(geosmithia.seqs,"/Volumes/control_experiments/phosphojet_and_rootshield_experiments_summer_2020/nursery_summer_2020/phloem_fungi_ornl_jnigrarnaseq_su20_ajo_v2/geosmithia.seq.v2.fa")
+# Converting the table to a vector object where the ASV names are assigned to the appropriate sequence.
+geosmithia.seqs.fmt<-setNames(geosmithia.seqs$Row.names,row.names(geosmithia.seqs))
 
-#write.table(t.seqtab.tax_its_phloem,"~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/its.t.seqtab.tax_its_phloem.txt",row.names = TRUE,col.names = TRUE,sep='\t')
+# Converting to DNA string set for export as a fasta. 
+geosmithia.seqs.string.set<-Biostrings::DNAStringSet(geosmithia.seqs.fmt)
+
+#Biostrings::writeXStringSet(geosmithia.seqs.string.set,"~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/geosmithia.asvs.fa")
 ```
 
