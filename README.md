@@ -1,8 +1,3 @@
----
-title: "Analysis of Juglans nigra Phloem Archael/Bacterial Communities"
-author: "Aaron Onufrak"
-theme: minima
----
 
 # **Background**
 
