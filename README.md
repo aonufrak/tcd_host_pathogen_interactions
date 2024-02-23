@@ -16,5 +16,5 @@ Of the 72 trees, 36 trees were inoculated with the fungal pathogen *Geosmithia m
 
 # **Sample Processing**
 
-DNA was extracted from phloem tissues using a CTAB methd. Extracted DNA was amplified for the V4 region using the primers described in [Cregger et al. 2018](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-018-0413-8) and sequenced on the Illumina MiSeq platform using 2x250 bp chemistry at the [University of Tennessee Genomics Core](https://ceb.utk.edu/dna-sequencing/).
+DNA was extracted from phloem tissues using a CTAB methd. Extracted DNA was amplified for the V4 region using the primers described in [Cregger et al. 2018](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-018-0413-8) and sequenced on the Illumina MiSeq platform using 2x250 bp chemistry.
 
