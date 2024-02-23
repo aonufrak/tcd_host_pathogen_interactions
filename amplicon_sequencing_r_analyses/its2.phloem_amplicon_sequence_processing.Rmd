@@ -1,5 +1,5 @@
 ---
-title: "Analysis of Juglans nigra Root Bacterial Communities"
+title: "Analysis of Juglans nigra Phloem Fungal Communities"
 author: "Aaron Onufrak"
 date: "7/16/2021"
 output: rmdformats::downcute
@@ -436,6 +436,10 @@ geosmithia.seqs.fmt<-setNames(geosmithia.seqs$Row.names,row.names(geosmithia.seq
 # Converting to DNA string set for export as a fasta. 
 geosmithia.seqs.string.set<-Biostrings::DNAStringSet(geosmithia.seqs.fmt)
 
-#Biostrings::writeXStringSet(geosmithia.seqs.string.set,"~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/geosmithia.asvs.fa")
+Biostrings::writeXStringSet(geosmithia.seqs.string.set,"~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/geosmithia.asvs.fa")
+
+write.table(t.seqtab.tax_its_phloem,"~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/feb_22_2024.t.seqtab.tax_its_phloem_manuscript_version.txt",col.names=TRUE,sep='\t',row.names=TRUE)
+
+save.image("~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/feb_22_2024_its_phloem_sequence_processing_manuscript_version.RData")
 ```
 
