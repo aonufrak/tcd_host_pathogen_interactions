@@ -1,0 +1,608 @@
+---
+title: "Statistical Analyses of Juglans nigra Phlomem Fungal Communities"
+author: "Aaron Onufrak"
+output: rmdformats::downcute
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+## Background
+
+Thousand cankers disease (TCD) is caused by the fungal pathogen *Geosmithia morbida* and its insect vector *Pityophthorous juglandis* (walnut twig beetle; WTB). The most susceptible TCD host is *Juglans nigra* (eastern black walnut) an important timber and nut crop native to  portions of the eastern and midwestern U.S. TCD has been detected in 15 U.S. states and portions of Italy.
+
+At this time, the effects of *G. morbida* infection on the  *J. nigra* microbiome are not well understood. Therefore, the **objective of this study was to examine  the effects of *G.moribida* infection on the *J. nigra* phloem microbial communities**. **We expected that the bacterial communities associated with *J. nigra* phloem tissues would shift in response to G. morbida infection**.
+
+## Study Design
+In the nursery compound at the University of Tennessee Knoxville trees were treated with the following three treatments with 24 trees per treatment:
+
+1. Water Control
+2. [Phospho-Jet (Phosphorous Acid-based Fungicide, Arborjet)](https://arborjet.com/product/phospho-jet/)
+3. [Rootshield (*Trichoderma afroharzianum* strain T-22, BioWorks)](https://www.bioworksinc.com/rootshield-wp/)
+
+Of the 72 trees, 36 trees were inoculated with the fungal pathogen *Geosmithia morbida* isolate TN17 at four separate, equally spaced locations along the stem. This isolate was chosen because it was originally isolated from black walnut in TN and its genome has been sequenced. The remaining 36 trees were inoculated with a potato dextrose agar (PDA) plug to use as an inoculation control. Inoculations took place 7 days following application of Phospho-Jet, Rootshield, and water treatments. On days 14, 28, and 56 post treatment application, trees were destructively sampled with roots and stem tissues sampled for DNA and RNA extraction. 
+
+## Sample Processing
+
+DNA was extracted from phloem tissues using a CTAB method. Extracted DNA was amplified for the ITS2 region using the primers described in [Cregger et al. 2018](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-018-0413-8) and sequenced on the Illumina MiSeq platform using 2x250 bp chemistry. Sequences were processed into amplicon sequence variants (ASVs) using the dada2 pipeline. Description of the sequence processing can be found in the [aonufrak/tcd_host_pathogen_interactions repository](https://github.com/aonufrak/tcd_host_pathogen_interactions/tree/main)  including the [original r code](https://github.com/aonufrak/tcd_host_pathogen_interactions/blob/main/amplicon_sequencing_r_analyses/its2.phloem_amplicon_sequence_processing.Rmd) and the knitted [html document](https://github.com/aonufrak/tcd_host_pathogen_interactions/blob/main/amplicon_sequencing_r_analyses/its2.phloem_amplicon_sequence_processing.html).
+
+# Load Packages
+
+Loading the packages required to complete the following analyses. 
+
+```{r}
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ape)
+library(pime)
+library(phyloseq)
+library(hillR)
+
+```
+
+# Generating Functions
+
+Creating custom functions to be used for statistical analyses. 
+
+## Rarefy Table Function
+
+The below function takes a rarfied table as input and removes samples that do not have the minimum sampling depth and any ASV that has a sum across samples of zeros following rarefaction. The function takes as input the following items: 
+
+1. **rarefied_table**: a rarefied ASV table with unrarefied samples and zero sum ASVs still present
+2. **sample**: sequencing depth by which all samples were rarefied.
+
+```{r}
+# Removing unrarefied samples (those less than the minimum sequencing depth). Removing ASVs present in the ASV table that were only present in samples removed following rarefaction. These ASVs will have column sums of 0. 
+rarefy_formatting<-function(nonrarefied_asv_tab,sample){
+  rarefied_table<-suppressWarnings(as.data.frame(rrarefy(nonrarefied_asv_tab, sample=sample)))
+  ds.rarefied<-as.data.frame(subset(rarefied_table, rowSums(rarefied_table)>=sample))
+  ds.rare.asv<-ds.rarefied[,colSums(ds.rarefied)>0]
+  if(all(rowSums(ds.rare.asv)==sample)){
+    print(paste0("All samples rarefied to ",sample))
+  }
+  return(ds.rare.asv)
+}
+```
+
+## PCoA and Ordination Function
+
+The below function wraps the vegdist function from vegan and the pcoa function from ape and generates an ordination using ggplot. The results of the PCoA and the ggplot are stored in a two object list. The first is the PCoA output and the second is the ggplot that can be further customized using ggplot arguments. The function requires the following input:
+
+1. **table**: a rarefied ASV table
+2. **method**: a method for computing distances (see: ??vegan::vegdist for options)
+3. **point_ellipse_color**: The variable by which points and ellipses should be colored
+4. **shape**: Shaping variable
+5. **polygon**: Logical value indiciating whether filled ellipses should be plotted to reprsented. This is useful when working with data with multiple factors. **Must be specified with ellipse_fill has a value.** 
+6. **ellipse_fill**: Variable by which filled ellipses should be colored. 
+7. **point_size**: Size of points for ordination. Default is 3.5
+
+```{r}
+pcoa_imager<-function(table,method,point_ellipse_color,shape=NULL,polygon=NULL,ellipse_fill=NULL,point_size=3.5){
+  column_grabber<-`[[` # Generating a subsetting function
+  point_ellipse_color<-column_grabber(table,point_ellipse_color) # will subset the column that contains the provided variable by which points and ellipses should be colored
+  ellipse_fill<-column_grabber(table,ellipse_fill) # will subset the column that contains the variabe by which ellipses will be filled
+  shape<-column_grabber(table,shape) # will subset the column that contains the point shaping variabe 
+  relabund.asv<-decostand(Filter(x=table,f=is.numeric), method="total") # using the decostand function from vegan to convert count data to relative abundances
+  dist.asv<-vegdist(relabund.asv, method=method) # calculating distance matrix using the vegdist function from vegan. Method is a user specified variable to indicate which method for computing distance to be used. 
+  pcoa.asv<-pcoa(dist.asv) # using the pcoa function from ape to perform a PCoA with the distance matrix stored in dist.asv. 
+  pcoavec.asv<-as.data.frame(pcoa.asv$vectors) # creating a dataframe that only includes the vectors from the PCoA.
+  pcoasitescores.asv<-data.frame(PC1=pcoavec.asv$Axis.1, PC2=pcoavec.asv$Axis.2) # creating a datatable that is only the first and second PCs. 
+  
+  # creating a if/else statement based on presence of ellipse_fill. 
+      if (is.null(ellipse_fill)){
+      pcoagraph.asv<-data.frame(pcoasitescores.asv,PC1=pcoasitescores.asv$PC1, PC2=pcoasitescores.asv$PC2, color=point_ellipse_color, shape_var=shape)
+    } else {
+  pcoagraph.asv<-data.frame(pcoasitescores.asv,PC1=pcoasitescores.asv$PC1, PC2=pcoasitescores.asv$PC2, color=point_ellipse_color, ellipse_fill=ellipse_fill, shape_var=shape)}
+  
+  # Generates standard deviation ellipses based on color variable
+  pcoaellipse<-ordiellipse(pcoasitescores.asv,pcoagraph.asv$color, display="sites", kind="sd", draw="none")
+  ell <- data.frame()
+for(g in levels(as.factor(pcoagraph.asv$color))){
+ell <- rbind(ell, cbind(as.data.frame(with(pcoagraph.asv[pcoagraph.asv$color==g,],                                                vegan:::veganCovEllipse(pcoaellipse[[g]]$cov,pcoaellipse[[g]]$center,pcoaellipse[[g]]$scale))) ,color=g))}
+  
+  # Generates secondary ellipse for second color
+pcoaellipse.2<-ordiellipse(pcoasitescores.asv,pcoagraph.asv$ellipse_fill, display="sites", kind="sd", draw="none")
+  ell_2 <- data.frame()
+for(g in levels(as.factor(pcoagraph.asv$ellipse_fill))){
+ell_2 <- rbind(ell_2, cbind(as.data.frame(with(pcoagraph.asv[pcoagraph.asv$elllipse_fill==g,],                                                vegan:::veganCovEllipse(pcoaellipse.2[[g]]$cov,pcoaellipse.2[[g]]$center,pcoaellipse.2[[g]]$scale))) ,ellipse_fill=g))}  
+  
+# Plotting first two PCs of PCoA in ggplot  
+  
+  # If an ellipse_fill variable is present polygon must be set to true
+  if (polygon==TRUE){
+  # If statement that indicates what to do in the absence of a shape variable
+    if (is.null(shape)){
+      pcoa_plot<-ggplot(pcoagraph.asv, aes(PC1,PC2, colour=color))+
+      geom_point(size=point_size)+
+      geom_path(data=ell, aes(x=PC1, y=PC2, colour=color),linewidth=0.5, linetype=1)+
+  geom_polygon(data=ell_2, aes(x=PC1, y=PC2, fill=ellipse_fill),linewidth=0.5, linetype=2,inherit.aes = FALSE,alpha=0.1)+
+  theme(axis.title.x=element_text(size=14, face="bold"))+
+  theme(axis.title.y=element_text(size=14, face="bold"))+
+  theme(axis.text.x=element_text(size=12, face="bold"))+
+  theme(axis.text.y=element_text(size=12, face="bold"))+ 
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+    panel.border=element_rect(colour="black", linewidth =1, fill=NA),
+    panel.background = element_rect(fill="white"))+
+    xlab(paste0("PC1"," (",round(column_grabber(pcoa.asv,"values")[1,2]*100,2),"%)"))+
+    ylab(paste0("PC2"," (",round(column_grabber(pcoa.asv,"values")[2,2]*100,2),"%)"))
+   
+       } else {
+  pcoa_plot<-ggplot(pcoagraph.asv, aes(PC1,PC2, colour=color))+       
+  geom_point(aes(shape=shape_var),size=point_size)+
+  geom_path(data=ell, aes(x=PC1, y=PC2, colour=color),linewidth=0.5, linetype=1)+
+  geom_polygon(data=ell_2, aes(x=PC1, y=PC2, fill=ellipse_fill),linewidth=0.5, linetype=2,inherit.aes = FALSE,alpha=0.1)+
+  theme(axis.title.x=element_text(size=14, face="bold"))+
+  theme(axis.title.y=element_text(size=14, face="bold"))+
+  theme(axis.text.x=element_text(size=12, face="bold"))+
+  theme(axis.text.y=element_text(size=12, face="bold"))+ 
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+    panel.border=element_rect(colour="black", linewidth =1, fill=NA),
+    panel.background = element_rect(fill="white"))+
+    xlab(paste0("PC1"," (",round(column_grabber(pcoa.asv,"values")[1,2]*100,2),"%)"))+
+    ylab(paste0("PC2"," (",round(column_grabber(pcoa.asv,"values")[2,2]*100,2),"%)"))}
+         
+    } else {
+      
+      if (is.null(shape)){
+      pcoa_plot<-ggplot(pcoagraph.asv, aes(PC1,PC2, colour=color))+
+      geom_point(size=point_size)+
+      geom_path(data=ell, aes(x=PC1, y=PC2, colour=color),linewidth=0.5, linetype=1)+
+  theme(axis.title.x=element_text(size=14, face="bold"))+
+  theme(axis.title.y=element_text(size=14, face="bold"))+
+  theme(axis.text.x=element_text(size=12, face="bold"))+
+  theme(axis.text.y=element_text(size=12, face="bold"))+ 
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+    panel.border=element_rect(colour="black", linewidth =1, fill=NA),
+    panel.background = element_rect(fill="white"))+
+    xlab(paste0("PC1"," (",round(column_grabber(pcoa.asv,"values")[1,2]*100,2),"%)"))+
+    ylab(paste0("PC2"," (",round(column_grabber(pcoa.asv,"values")[2,2]*100,2),"%)"))
+      
+        } else {
+ pcoa_plot<-ggplot(pcoagraph.asv, aes(PC1,PC2, colour=color))+ 
+  geom_point(aes(shape=shape_var), size=point_size)+
+  geom_path(data=ell, aes(x=PC1, y=PC2, colour=color),linewidth=0.5, linetype=1)+
+ theme(axis.title.x=element_text(size=14, face="bold"))+
+  theme(axis.title.y=element_text(size=14, face="bold"))+
+  theme(axis.text.x=element_text(size=12, face="bold"))+
+  theme(axis.text.y=element_text(size=12, face="bold"))+ 
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+    panel.border=element_rect(colour="black", size=1, fill=NA),
+    panel.background = element_rect(fill="white"))+
+      xlab(paste0("PC1"," (",round(column_grabber(pcoa.asv,"values")[1,2]*100,2),"%)"))+
+    ylab(paste0("PC2"," (",round(column_grabber(pcoa.asv,"values")[2,2]*100,2),"%)"))}
+    }
+  pcoa_func_out<-list(pcoa.asv,pcoa_plot)
+  return(pcoa_func_out)
+}
+
+```
+
+## Taxonomy String Cleaner
+
+A function to clean-up taxonomy string names so that they are more aesthetically pleasing. Function takes as input the following object:
+
+**taxonomy.table**: A taxonomy table object. 
+
+```{r}
+taxonomy_string_clean<-function(taxonomy.table){
+    taxonomy.table[["Kingdom"]]<-sub("k__","",taxonomy.table[["Kingdom"]])
+    taxonomy.table[["Phylum"]]<-sub("p__","",taxonomy.table[["Phylum"]])
+    taxonomy.table[["Class"]]<-sub("c__","",taxonomy.table[["Class"]])
+    taxonomy.table[["Order"]]<-sub("o__","",taxonomy.table[["Order"]])
+    taxonomy.table[["Family"]]<-sub("f__","",taxonomy.table[["Family"]])
+    taxonomy.table[["Genus"]]<-sub("g__","",taxonomy.table[["Genus"]])
+    taxonomy.table[["Species"]]<-sub("s__","",taxonomy.table[["Species"]])
+    which(is.na(taxonomy.table))<-"Unassigned"
+    return(taxonomy.table)
+  }
+```
+
+
+## Relative Abundance Plot Function
+
+A function to generates relative abundance bar charts that requires the following input:
+
+1. **metadata**: The object containing metadata info to be used for grouping data. **ROW NAMES MUST MATCH THOSE IN ASV TABLE**
+2. **taxonomy.table**: Taxonomy table generated by the dada2 pipeline
+3. **asv.table**: Rarefied ASV table
+4. **grouping.var**: Grouping variable present in the metadata object 
+5. **taxon_level**: Taxonomy level to be used for plotting
+6. **cut_off**: Relative abundance cut-off to be shown in the chart
+
+```{r}
+
+relative_abundance_plots<-function(metadata,taxonomy.table,asv.table,grouping.var,taxon_level,cut_off,kingdom){
+if(deparse(substitute(taxon_level))=="Kingdom"){
+  stop("YOU SPECIFIED TAXON LEVEL AS KINGDOM, THIS WILL BREAK THE CODE AND GIVE YOU A HEADACHE SO STOP")
+}
+  if(kingdom=="fungi"){
+    taxonomy.table[["Kingdom"]]<-sub("k__","",taxonomy.table[["Kingdom"]])
+    taxonomy.table[["Phylum"]]<-sub("p__","",taxonomy.table[["Phylum"]])
+    taxonomy.table[["Class"]]<-sub("c__","",taxonomy.table[["Class"]])
+    taxonomy.table[["Order"]]<-sub("o__","",taxonomy.table[["Order"]])
+    taxonomy.table[["Family"]]<-sub("f__","",taxonomy.table[["Family"]])
+    taxonomy.table[["Genus"]]<-sub("g__","",taxonomy.table[["Genus"]])
+    taxonomy.table[["Species"]]<-sub("s__","",taxonomy.table[["Species"]])
+    taxonomy.tale[,which(is.na())]<-"Unassigned"
+  }
+  metadata.asv.tab<-merge(metadata,asv.table,by.x=0,by.y=0) # Merges asv table and metadata file by row names
+  metadata.asv.tab_group_sums<-metadata.asv.tab[,c(which(colnames(metadata.asv.tab)==paste0("",deparse(substitute(grouping.var)),"")),which(sapply(metadata.asv.tab,is.numeric)))]%>% # Takes the sum of each ASV by the grouping variable
+    as.data.frame()%>%
+    group_by({{grouping.var}})%>%
+    summarize_all(sum)%>%
+    as.data.frame()
+  row.names(metadata.asv.tab_group_sums)<-metadata.asv.tab_group_sums[[deparse(substitute(grouping.var))]] # Converts grouping variable to rownames
+  metadata.asv.tab_group_sums[[deparse(substitute(grouping.var))]]<-NULL # Removes duplicate column 
+  t.metadata.asv.tab_group_sums<-as.data.frame(t(metadata.asv.tab_group_sums)) # Transposes group sum data frame
+ t.metadata.asv.tab_group_sums[]<-as.data.frame(sapply(t.metadata.asv.tab_group_sums,as.numeric)) # Converts data to numeric
+  metadata.asv.tab.taxonomy_group_sums<-merge(taxonomy.table,t.metadata.asv.tab_group_sums,by=0)
+  # Merges taxonomy information into group summed ASV table
+ metadata.asv.tab.taxonomy_taxon_sums<-metadata.asv.tab.taxonomy_group_sums[,c(which(colnames(metadata.asv.tab.taxonomy_group_sums)==paste0("",deparse(substitute(taxon_level)),"")),which(sapply(metadata.asv.tab.taxonomy_group_sums,is.numeric)))]%>% # Takes the sum of ASVs by their taxonomic assignment
+ as.data.frame()%>%
+group_by({{taxon_level}})%>%
+summarize_all(sum)%>%
+as.data.frame()
+
+ metadata.asv.tab.taxonomy_taxon_sums[[deparse(substitute(taxon_level))]][which(is.na(metadata.asv.tab.taxonomy_taxon_sums[[deparse(substitute(taxon_level))]]))]<-"Unassigned" # Renames NA assignments as unassigned 
+  rownames(metadata.asv.tab.taxonomy_taxon_sums)<-metadata.asv.tab.taxonomy_taxon_sums[[deparse(substitute(taxon_level))]] # Updates row names to taxonomy names
+  metadata.asv.tab.taxonomy_taxon_sums[[deparse(substitute(taxon_level))]]<-NULL # Removes duplicate column
+  t.metadata.asv.tab.taxonomy_taxon_sums<-as.data.frame(t(metadata.asv.tab.taxonomy_taxon_sums)) # Transposes data frame 
+  t.metadata.asv.tab.taxonomy_taxon_cutoff<-t.metadata.asv.tab.taxonomy_taxon_sums[,which((colSums(t.metadata.asv.tab.taxonomy_taxon_sums[,grep("Unassigned",colnames(t.metadata.asv.tab.taxonomy_taxon_sums),invert=TRUE)])/sum(t.metadata.asv.tab.taxonomy_taxon_sums))>substitute(cut_off))] # Creates an object that has only those ASVs that have a relative abundance greater than the specified cut-off
+    t.metadata.asv.tab.taxonomy_taxon_other<-t.metadata.asv.tab.taxonomy_taxon_sums[,which((colSums(t.metadata.asv.tab.taxonomy_taxon_sums[,grep("Unassigned",colnames(t.metadata.asv.tab.taxonomy_taxon_sums),invert=TRUE)])/sum(t.metadata.asv.tab.taxonomy_taxon_sums))<substitute(cut_off))] # Creates an object that contains only the taxa who fell below the specified relative abundance cut-off
+  taxon_unassigned<-data.frame(Unassigned=t.metadata.asv.tab.taxonomy_taxon_sums[,grep("Unassigned",colnames(t.metadata.asv.tab.taxonomy_taxon_sums),invert=FALSE)]) # Creates an object to store the unassigned taxa
+  other<-data.frame(Other=rowSums( t.metadata.asv.tab.taxonomy_taxon_other)) # Takes the sum of the taxa that fell below the cut-off
+  t.metadata.asv.tab.taxonomy_taxon_cutoff_relabund<-decostand(cbind(t.metadata.asv.tab.taxonomy_taxon_cutoff,other,taxon_unassigned),method="total") # Calculates relative abundance 
+  t.metadata.asv.tab.taxonomy_taxon_cutoff_relabund_long<-t.metadata.asv.tab.taxonomy_taxon_cutoff_relabund%>%
+   tibble::rownames_to_column(var="Treatment")%>%
+   pivot_longer(cols=!Treatment,names_to = "taxon_level_plot", values_to = "Relative.Abundance")%>%
+    as.data.frame() # Converts data frame to long
+  
+t.metadata.asv.tab.taxonomy_taxon_cutoff_relabund_long[["taxon_level_plot"]]<-factor(unique(t.metadata.asv.tab.taxonomy_taxon_cutoff_relabund_long[["taxon_level_plot"]]),levels=unique(t.metadata.asv.tab.taxonomy_taxon_cutoff_relabund_long[["taxon_level_plot"]])) # Converts 
+
+colour_count<-length(unique(t.metadata.asv.tab.taxonomy_taxon_cutoff_relabund_long[["taxon_level_plot"]]))
+getPalette <- colorRampPalette(RColorBrewer::brewer.pal(9,"Set1"))
+  
+return(ggplot(t.metadata.asv.tab.taxonomy_taxon_cutoff_relabund_long,aes(x=Treatment,y=Relative.Abundance))+
+geom_col(aes(x=Treatment,y=Relative.Abundance,fill=taxon_level_plot),linewidth=0.75,inherit.aes = FALSE,color="black")+
+theme(panel.grid=element_blank(),panel.border = element_rect(color="black",fill=NA),panel.background = element_rect(fill="white"),legend.position = "bottom")+
+  scale_fill_manual(values = c(getPalette(colour_count-1),"lightgrey"))+
+guides(fill=guide_legend(title = deparse(substitute(taxon_level)))))
+}
+
+```
+
+# Data Importing
+
+Importing the following files to be used for analyses: 
+
+1. **feb_22_2024.t.seqtab.tax_its_phloem_manuscript_version**: final version of the ASV table that includes taxonomy assignments and count data for each ASV. 
+2. **metadata.2020.nursery.study_microbiome_transcriptome**: metadata file that describes the treatments applied to each tree. 
+
+```{r}
+# Importing study metadata
+metadata_its_phloem<-read.table("~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/raw_data/metadata.2020.nursery.study_microbiome_transcriptome.txt",header=TRUE,sep='\t')
+
+# Importing transposed ASV table with taxonomy information into R. 
+t.seqtab.tax_its_phloem_original<-read.table("~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/feb_22_2024.t.seqtab.tax_its_phloem_manuscript_version.txt",header=TRUE,sep='\t')
+
+# Importing ASVs identified as Geosmithia morbida
+geosmithia_labels<-labels(read.FASTA("~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/geosmithia.asvs.fa"))
+
+```
+
+# Data Formatting
+
+Reformatting the **t.seqtab.tax_its_phloem_original** object so that there are separate taxonomy and ASV tables. 
+
+```{r}
+# Making row names the sample ID in the metadata
+row.names(metadata_its_phloem)<-metadata_its_phloem$Tree.ID
+
+# Reformatting names of some treatments in metadata file
+metadata_its_phloem$Treatment<-sub("Phospho-Jet","PJ",metadata_its_phloem$Treatment)
+metadata_its_phloem$Treatment<-sub("Rootshield","RS",metadata_its_phloem$Treatment)
+metadata_its_phloem$Treatment<-sub("Control","WC",metadata_its_phloem$Treatment)
+
+metadata_its_phloem$GM<-sub("GM17","TN Gm17",metadata_its_phloem$GM)
+
+metadata_its_phloem$Day<-paste0("D",metadata_its_phloem$Day)
+
+# Creating addition columns for potential treatment combinations of interest
+
+# Inoculation Type x Management Treatment
+metadata_its_phloem$GMTrT<-paste0(metadata_its_phloem$GM,"_",metadata_its_phloem$Treatment)
+
+# Date x Inoculation Type x Management Treatment
+metadata_its_phloem$DayGMTrT<-paste0(metadata_its_phloem$Day,"_",metadata_its_phloem$GM,"_",metadata_its_phloem$Treatment)
+
+# Date x Management Treatment
+metadata_its_phloem$DayTrT<-paste0(metadata_its_phloem$Day,"_",metadata_its_phloem$Treatment)
+
+# Date x Inoculation Type
+metadata_its_phloem$DayGM<-paste0(metadata_its_phloem$Day,"_",metadata_its_phloem$GM)
+
+# Selecting only the ASV count data
+t.asv.tab_its_phloem<-select_if(t.seqtab.tax_its_phloem_original,is.numeric)
+
+# Transposing the ASV table so that it can be used with vegan
+asv.tab_its_phloem<-t(t.asv.tab_its_phloem)
+
+# Adjusting names to remove space and have a period
+colnames(asv.tab_its_phloem)<-sub(" ",".",colnames(asv.tab_its_phloem))
+
+# Merging metadata and ASV table together
+metadata.asv.tab_its_phloem<-merge(metadata_its_phloem,asv.tab_its_phloem,by.x="Tree.ID",by.y=0)
+
+# Checking that row names and column names are as expected. Row names should be sample names and column names should be ASV labels. 
+rownames(asv.tab_its_phloem)
+colnames(asv.tab_its_phloem)
+
+# Selecting only the taxonomy data
+asv.tax_its_phloem<-select_if(t.seqtab.tax_its_phloem_original[,-1],is.character)
+
+# Cleaning taxonomy strings
+asv.tax_its_phloem_clean<-taxonomy_string_clean(asv.tax_its_phloem)
+
+# Adjusting row names to remove space and include a period. 
+row.names(asv.tax_its_phloem_clean)<-sub(" ",".",row.names(asv.tax_its_phloem_clean))
+
+geosmithia_labels<-sub(" ",".",geosmithia_labels)
+
+```
+
+# Sample Rarefaction
+
+Prior to performing alpha- and beta-diversity analyses, rarefying samples to the same sequencing depth. Rarefying data is the recommended data normalization technique for amplicon sequencing studies [Schloss et al. 2024](https://journals.asm.org/doi/full/10.1128/msphere.00354-23).
+
+```{r}
+# Determining the number of sequences per sample starting from least to greatest. 
+sort(rowSums(asv.tab_its_phloem))
+
+# Using the rarecurve function from vegan to generate rarefaction curves
+asv.rarecurve.tab_its_phloem<-vegan::rarecurve(asv.tab_its_phloem,tidy = TRUE)
+
+# Plotting rarefaction curves in ggplot
+rarecurve.plot_its<-ggplot()+
+  geom_line(data=asv.rarecurve.tab_its_phloem,aes(x=Sample,y=Species,color=Site))+
+  geom_vline(data=NULL,xintercept=c(sort(rowSums(asv.tab_its_phloem))[c(1,2,3,5,7,10)]))+
+  theme(legend.position="none")+
+  geom_text(data=NULL,aes(x=sort(rowSums(asv.tab_its_phloem))[1]-1000,y=500,label=sort(rowSums(asv.tab_its_phloem))[1],angle=90))+
+    geom_text(data=NULL,aes(x=sort(rowSums(asv.tab_its_phloem))[2]-1000,y=500,label=sort(rowSums(asv.tab_its_phloem))[2],angle=90))+
+  geom_text(data=NULL,aes(x=sort(rowSums(asv.tab_its_phloem))[3]-1000,y=500,label=sort(rowSums(asv.tab_its_phloem))[3],angle=90))+
+  geom_text(data=NULL,aes(x=sort(rowSums(asv.tab_its_phloem))[5]-1000,y=500,label=sort(rowSums(asv.tab_its_phloem))[5],angle=90))+
+  geom_text(data=NULL,aes(x=sort(rowSums(asv.tab_its_phloem))[7]-1000,y=500,label=sort(rowSums(asv.tab_its_phloem))[7],angle=90))+
+  geom_text(data=NULL,aes(x=sort(rowSums(asv.tab_its_phloem))[10]-1000,y=500,label=sort(rowSums(asv.tab_its_phloem))[10],angle=90))
+
+rarecurve.plot_its
+
+# Using the custom rarefy_formatting function to rarefy all samples to the same sequencing depth. 
+#rare.asv.tab_its_phloem<-rarefy_formatting(asv.tab_its_phloem,sample=sort(rowSums(asv.tab_its_phloem))[2])
+
+# Writing the rarefied ASV table to file. 
+#write.table(rare.asv.tab_its_phloem,"~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/feb_23_2024_its_rarefied_asv_table_manuscript_version.txt",row.names=TRUE,col.names=TRUE,sep='\t')
+
+```
+
+# Whole Community Analyses
+
+Analyzing results for whole community first before diving into the core microbiome. 
+
+## Alpha-Diversity Analyses
+
+Testing for differences in alpha-diversity or the richness and diversity of fungal taxa between treatments.
+
+```{r}
+# Reading in the rarefied ASV table 
+rare.asv.tab_its_phloem<-read.table("~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/feb_23_2024_its_rarefied_asv_table_manuscript_version.txt",header=TRUE,sep='\t')
+
+# Merging the sample metadata with the rarefied asv table
+metadata.rare.asv.tab_its_phloem<-merge(metadata_its_phloem,rare.asv.tab_its_phloem,by.x="Tree.ID",by.y=0)
+
+# Calculating alpha-diversity measures usuing the hillR function.
+its.phloem_alpha_diversity<-data.frame(select_if(metadata.rare.asv.tab_its_phloem,is.character),q0=hill_taxa(select_if(metadata.rare.asv.tab_its_phloem,is.numeric),q=0),q1=hill_taxa(select_if(metadata.rare.asv.tab_its_phloem,is.numeric),q=1),q2=hill_taxa(select_if(metadata.rare.asv.tab_its_phloem,is.numeric),q=2))
+
+# Performing ANOVA for q0 with interaction term first
+its.phloem_q0<-aov(formula=q0~Day*Treatment*GM,its.phloem_alpha_diversity)
+par(mfrow=c(2,2))
+plot(its.phloem_q0)
+car::Anova(its.phloem_q0,type="III")
+
+# Performing ANOVA for q0 with non-significant interaction terms dropped
+its.phloem_q0<-aov(formula=q0~Day+Treatment+GM,its.phloem_alpha_diversity)
+par(mfrow=c(2,2))
+plot(its.phloem_q0)
+car::Anova(its.phloem_q0,type="III")
+
+# Performing ANOVA for q1 with interaction term first
+its.phloem_q1<-aov(formula=q1~Day*Treatment*GM,its.phloem_alpha_diversity)
+par(mfrow=c(2,2))
+plot(its.phloem_q1)
+car::Anova(its.phloem_q1,type="III")
+
+# Performing ANOVA for q1 with non-significant interaction terms dropped
+its.phloem_q1<-aov(formula=q1~Day+Treatment+GM,its.phloem_alpha_diversity)
+par(mfrow=c(2,2))
+plot(its.phloem_q1)
+car::Anova(its.phloem_q1,type="III")
+
+# Performing ANOVA for q2 with interaction term first
+its.phloem_q2<-aov(formula=q2~Day*Treatment*GM,its.phloem_alpha_diversity)
+par(mfrow=c(2,2))
+plot(its.phloem_q2)
+car::Anova(its.phloem_q2,type="III")
+
+# Performing ANOVA for q2 with non-significant interaction terms dropped
+its.phloem_q2<-aov(formula=q2~Day+Treatment+GM,its.phloem_alpha_diversity)
+par(mfrow=c(2,2))
+plot(its.phloem_q2)
+car::Anova(its.phloem_q2,type="III")
+
+
+# Converting to long form
+its.phloem_alpha_diversity_long<-gather(its.phloem_alpha_diversity,key="q",value="index",11:13)
+
+
+# Plotting alpha-diversity in ggplot
+ggplot(its.phloem_alpha_diversity_long,aes(x=GMTrT,y=index,fill=GMTrT))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(inherit.aes=FALSE,aes(x=GMTrT,y=index,fill=GMTrT),shape=21,color="black",alpha=0.8)+
+  facet_wrap(.~Day+q,scales = "free_y",dir = "v")+
+  guides(fill=guide_legend("Inoculation x Treatment"))+
+  theme(panel.grid=element_blank(),panel.border = element_blank(),panel.background=element_blank(),axis.text.x = element_blank(),axis.ticks.x = element_blank(),axis.line.y.left = element_line(color="black"),axis.line.x.bottom = element_line(color="black"))+
+  ylab("Index Value")+
+  xlab("Inoculation x Treatment")+
+  scale_fill_discrete(labels=c("PDA x PHOSPHO-JET","PDA x RootShield", "PDA x Water Control", "TN Gm17 x PHOSPHO-JET","TN GM17 x RootShield","TN GM17 x Water Control"))
+```
+
+# Beta-Diversity Analyses of total communities
+
+Comparing differences in community composition between samples using principal coordinate analyses. 
+
+```{r}
+# Reading in the rarefied ASV table 
+rare.asv.tab_its_phloem<-read.table("~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/feb_23_2024_its_rarefied_asv_table_manuscript_version.txt",header=TRUE,sep='\t')
+
+# Merging the sample metadata with the rarefied asv table
+metadata.rare.asv.tab_its_phloem<-merge(metadata_its_phloem,rare.asv.tab_its_phloem,by.x="Tree.ID",by.y=0)
+
+# Generating PCoA and ordination plot
+pcoa_all_dates_its_phloem<-pcoa_imager(table = metadata.rare.asv.tab_its_phloem,method = "bray",point_ellipse_color = "GMTrT",shape = "GM",polygon = TRUE,ellipse_fill = "GM")
+pcoa_all_dates_its_phloem[2][[1]]+
+  scale_fill_discrete(labels=c("PDA","TN Gm17"))+
+  scale_color_discrete(labels=c("PDA x PHOSPHO-JET","PDA x RootShield", "PDA x Water Control", "TN Gm17 x PHOSPHO-JET","TN GM17 x RootShield","TN GM17 x Water Control"))+
+  scale_shape_discrete(labels=c("PDA","TN Gm17"))+
+  guides(fill=guide_legend("Inoculation"),shape=guide_legend("Inoculation"), color=guide_legend("Inoculation x Treatment"))
+
+# Conducting PERMANOVA
+permanova_all_dates_its_phloem<-as_tibble(adonis2(select_if(metadata.rare.asv.tab_its_phloem,is.numeric)~metadata.rare.asv.tab_its_phloem$Treatment*metadata.rare.asv.tab_its_phloem$GM*metadata.rare.asv.tab_its_phloem$Day),rownames = "Variable")
+
+permanova_all_dates_its_phloem$Variable<-gsub("metadata.rare.asv.tab_its_phloem\\$","",permanova_all_dates_its_phloem$Variable)
+
+permanova_all_dates_its_phloem
+```
+
+# Fungal Communities Relative Abundance
+
+Generating Relative abundance plots for the total fungal community
+
+```{r}
+relative_abundance_plots(metadata = metadata_its_phloem,taxonomy.table = asv.tax_its_phloem_clean,asv.table = rare.asv.tab_its_phloem,grouping.var = GMTrT,taxon_level = Kingdom,cut_off = 0.01,kingdom = "Fungi")
+```
+
+
+# Core Microbiome Filtering
+
+
+```{r}
+# Reading in the rarefied ASV table 
+rare.asv.tab_its_phloem<-read.table("~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/feb_23_2024_its_rarefied_asv_table_manuscript_version.txt",header=TRUE,sep='\t')
+
+# Creating a phyloseq otu table
+rare.asv.tab_phyloseq<-phyloseq::otu_table(rare.asv.tab_its_phloem,taxa_are_rows = FALSE)
+
+# Creating a phyloseq tax table
+rare.tax.tab_phyloseq<-phyloseq::tax_table(as.matrix(asv.tax_its_phloem_clean[row.names(asv.tax_its_phloem_clean)%in%colnames(rare.asv.tab_its_phloem),]))
+
+# Creating a phyloseq metadata object
+row.names(metadata_its_phloem)<-metadata_its_phloem$Tree.ID
+rare.sample.metadata_phyloseq<-phyloseq::sample_data(metadata_its_phloem[metadata_its_phloem$Tree.ID%in%row.names(rare.asv.tab_its_phloem),])
+
+# Creating a phyloseq object
+rare.asv.tab.tax.meta_phyloseq<-phyloseq::phyloseq(rare.asv.tab_phyloseq,rare.tax.tab_phyloseq,rare.sample.metadata_phyloseq)
+
+# Determining out of bag error rate pre-filtering
+pime.oob.error(rare.asv.tab.tax.meta_phyloseq,"GM")
+
+# Splitting samples into groups for prevalence filtering
+gm.split_pime_object<-pime.split.by.variable(rare.asv.tab.tax.meta_phyloseq,"GM")
+
+# Calculating ASV prevalences by GM treatment
+gm.split.prevalence_pime_object<-pime.prevalence(gm.split_pime_object)
+gm.split.prevalence_pime_object
+
+# Determining best prevalence interval based on OOB error rates
+gm.split.best.prevalence_pime_object<-pime.best.prevalence(gm.split.prevalence_pime_object,"GM")
+
+# Checking to see which ASVs are important for model errors 
+gm.split.best.prevalence_pime_object$Importance$`Prevalence 10`
+
+# Removing Geosmithia ASVs from rarefied asv table
+rare.asv.tab_its_phloem_no_gm<-rare.asv.tab_its_phloem[,!(colnames(rare.asv.tab_its_phloem)%in%geosmithia_labels)]
+
+# Creating a phyloseq otu table with GM removed
+rare.asv.tab_phyloseq_no_gm<-phyloseq::otu_table(rare.asv.tab_its_phloem_no_gm,taxa_are_rows = FALSE)
+
+# Creating a phyloseq tax table with GM removed
+rare.tax.tab_phyloseq_no_gm<-phyloseq::tax_table(as.matrix(asv.tax_its_phloem_clean[row.names(asv.tax_its_phloem_clean)%in%colnames(rare.asv.tab_its_phloem_no_gm),]))
+
+# Creating a phyloseq object
+rare.asv.tab.tax.meta_phyloseq_no_gm<-phyloseq::phyloseq(rare.asv.tab_phyloseq_no_gm,rare.tax.tab_phyloseq_no_gm,rare.sample.metadata_phyloseq)
+
+# Determining out of bag error rate pre-filtering
+pime.oob.error(rare.asv.tab.tax.meta_phyloseq_no_gm,"GMTrT")
+
+# Splitting samples into groups for prevalence filtering
+gm.split_pime_object_no_gm<-pime.split.by.variable(rare.asv.tab.tax.meta_phyloseq_no_gm,"GMTrT")
+
+# Estimating the accuracy of error predictions
+randomized_error_prediction<-pime.error.prediction(rare.asv.tab.tax.meta_phyloseq_no_gm, "GMTrT", bootstrap = 1000, parallel = TRUE, max.prev = 95)
+randomized$Plot
+
+# Calculating ASV prevalences by GM treatment
+gm.split.prevalence_pime_object_no_gm<-pime.prevalence(gm.split_pime_object_no_gm)
+gm.split.prevalence_pime_object_no_gm
+
+# Determining best prevalence interval based on OOB error rates
+gm.split.best.prevalence_pime_object_no_gm<-pime.best.prevalence(gm.split.prevalence_pime_object_no_gm,"GMTrT")
+
+# Checking to see which ASVs are important for model errors 
+gm.split.best.prevalence_pime_object_no_gm$Importance$`Prevalence 75`
+
+# Selecting phyloseq object for the prevalence filtered data
+gm.split.best.prevalence.filtered_object_no_gm<-gm.split.prevalence_pime_object_no_gm$`75`
+
+# Creating ASV table from the prevalence filtered data 
+prev.filtered.asv.tab_its_phloem<-as.data.frame(gm.split.best.prevalence.filtered_object_no_gm@otu_table)
+
+# Creating ASV table from the prevalence filtered data that is merged with sample metadata
+prev.filtered.metadata.asv.tab_its_phloem<-merge(metadata_its_phloem,gm.split.best.prevalence.filtered_object_no_gm@otu_table,by.x=0,by.y=0)
+
+# Creating taxonomy table from the prevalence filtered data
+prev.filtered.asv.tax_its_phloem<-as.data.frame(gm.split.best.prevalence.filtered_object_no_gm@tax_table)
+```
+
+# Beta-Diversity Analyses of Core Microbiome
+
+```{r}
+# Generating PCoA and ordination plot
+core_pcoa_all_dates_its_phloem<-pcoa_imager(table = prev.filtered.metadata.asv.tab_its_phloem,method = "bray",point_ellipse_color = "GMTrT",shape = "Treatment",polygon = TRUE,ellipse_fill = "Day")
+core_pcoa_all_dates_its_phloem[2]
+
+# Conducting PERMANOVA
+core_permanova_all_dates_its_phloem<-as_tibble(adonis2(select_if(prev.filtered.metadata.asv.tab_its_phloem,is.numeric)~prev.filtered.metadata.asv.tab_its_phloem$Treatment*prev.filtered.metadata.asv.tab_its_phloem$GM*prev.filtered.metadata.asv.tab_its_phloem$Day),rownames = "Variable")
+
+core_permanova_all_dates_its_phloem
+```
+
+# Core Fungal Communities Relative Abundance
+
+```{r}
+relative_abundance_plots(metadata = metadata_its_phloem,taxonomy.table = prev.filtered.asv.tax_its_phloem,asv.table = prev.filtered.asv.tab_its_phloem,grouping.var = GMTrT,taxon_level = Genus,cut_off = 0.01,kingdom = "Fungi")
+
+
+```
+
+
+
+
