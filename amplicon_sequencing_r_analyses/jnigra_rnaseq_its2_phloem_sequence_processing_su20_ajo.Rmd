@@ -1,0 +1,444 @@
+---
+title: "Analysis of Juglans nigra Phloem Fungal Communities"
+author: "Aaron Onufrak"
+output: rmdformats::downcute
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# **Introduction** 
+
+## **Background**
+Thousand cankers disease (TCD) is caused by the fungal pathogen *Geosmithia morbida* and its insect vector *Pityophthorous juglandis* (walnut twig beetle; WTB). The most susceptible TCD host is *Juglans nigra* (eastern black walnut) an important timber and nut crop native to  portions of the eastern and midwestern U.S. TCD has been detected in 15 U.S. states and portions of Italy.
+
+At this time, the effects of *G. morbida* infection on the  *J. nigra* microbiome are not well understood. Therefore, the **objective of this study was to examine  the effects of *G.moribida* infection on the *J. nigra* phloem microbial communities**. **We expected that the fungal communities associated with *J. nigra* phloem tissues would shift in response to G. morbida infection**. 
+
+
+## **Study Design**
+In the nursery compound at the University of Tennessee Knoxville trees were treated with the following three treatments with 24 trees per treatment:
+
+1. Water Control
+2. [Phospho-Jet (Phosphorous Acid-based Fungicide, Arborjet)](https://arborjet.com/product/phospho-jet/)
+3. [Rootshield (*Trichoderma afroharzianum* strain T-22, BioWorks)](https://www.bioworksinc.com/rootshield-wp/)
+
+Of the 72 trees, 36 trees were inoculated with the fungal pathogen *Geosmithia morbida* isolate TN17 at four separate, equally spaced locations along the stem. This isolate was chosen because it was originally isolated from black walnut in TN and its genome has been sequenced. The remaining 36 trees were inoculated with a potato dextrose agar (PDA) plug to use as an inoculation control. Inoculations took place 7 days following application of Phospho-Jet, Rootshield, and water treatments. On days 14, 28, and 56 post treatment application, trees were destructively sampled with roots and stem tissues sampled for DNA and RNA extraction. 
+
+## **Sample Processing**
+DNA was extracted from phloem tissues using a CTAB method. Amplified for the ITS2 region using the primers described in [Cregger et al. 2018](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-018-0413-8) and sequenced on the Illumina MiSeq platform using 2x250 bp chemistry at the [University of Tennessee Genomics Core](https://ceb.utk.edu/dna-sequencing/).
+
+# **Sequence Processing Methodology** 
+
+# **Step 1: Load Packages**
+
+Loading in the packages required to complete the sequence processing and statistical analyses.
+
+```{r}
+library(dada2)
+library(Biostrings)
+library(ShortRead)
+library(reticulate)
+```
+
+
+# **Step 2: Path Designations**
+
+Designating the path for the directory that contains the raw ITS2 sequence data and creating two objects, one for forward paths and the other for reverse paths.
+
+```{r}
+# Creating an object that has the pathway for the sequence directory
+phloem_its_path<-"/Volumes/control_experiments/phosphojet_and_rootshield_experiments_summer_2020/nursery_summer_2020/phloem_fungi_ornl_jnigrarnaseq_su20_ajo_v2/sequence_processing"
+
+# Listing the files present in the sequence directory
+list.files(phloem_its_path)
+
+# Creating objects for the forward and reverse reads
+forwardreads_its_phloem<-sort(list.files(phloem_its_path, pattern="L001_R1_001.fastq",full.names=TRUE))
+
+reversereads_its_phloem<-sort(list.files(phloem_its_path, pattern="L001_R2_001.fastq",full.names=TRUE))
+
+# Checking number of forward and reverse files. Should be an equal number of forward and reverse files. 
+length(forwardreads_its_phloem)
+length(reversereads_its_phloem)
+
+# Generating initial forward and reverse read quality plots
+initial_forward_qual<-plotQualityProfile(forwardreads_its_phloem, aggregate=TRUE)
+initial_forward_qual
+
+initial_reverse_qual<-plotQualityProfile(forwardreads_its_phloem, aggregate=TRUE)
+initial_reverse_qual
+```
+
+# **Step 3: Filtering of Ambiguous Reads** 
+
+Removing reads with ambiguous bases. 
+
+```{r}
+# Creating an object  that strips away the pathway information leaving behind only the filename.
+filebasename_its_phloem<-basename(forwardreads_its_phloem)
+
+# Cleaning sample names to match with metadata sheet
+basename_its_phloem<-sub("-ITS.*","",filebasename_its_phloem)
+treebasename_its_phloem<-sub("phloem-","",basename_its_phloem)
+numericbasename_its_phloem<-gsub("-","_",treebasename_its_phloem)
+
+# Creating an object that contains only sample names.
+samplenames_its_phloem<-numericbasename_its_phloem
+
+# Creating two path objects that will store the paths for filtered forward and reverse reads. 
+forward.filtN_its_phloem<-file.path(phloem_its_path,"filtN",basename(forwardreads_its_phloem))
+reverse.filtN_its_phloem<-file.path(phloem_its_path,"filtN",basename(reversereads_its_phloem))
+
+# Filtering forward and reverse reads using the filterAndTrim function. Specifying maxN=0 will indicate that sequences with at least 1 ambiguous base will be removed from the dataset. 
+filterAndTrim(forwardreads_its_phloem,forward.filtN_its_phloem,reversereads_its_phloem,reverse.filtN_its_phloem,maxN=0)
+
+# Creating quality profiles for the pre-filtered forward and reverse reads. 
+filtn_qualplot_fwd_its_phloem<-plotQualityProfile(forward.filtN_its_phloem, aggregate=TRUE)
+filtn_qualplot_fwd_its_phloem
+filtn_qualplot_rev_its_phloem<-plotQualityProfile(reverse.filtN_its_phloem, aggregate=TRUE)
+filtn_qualplot_rev_its_phloem
+```
+
+# **Step 4: Primer Removal**
+
+Removing primers used in the first step of PCR to amplify the ITS2 region. These are low diversity section that will not help with distinguishing between taxa. 
+
+```{r}
+# Creating strings that contain the forward and reverse primers used in the study.
+its3ngs1<-"CATCGATGAAGAACGCAG"
+its3ngs2<-"CAACGATGAAGAACGCAG"
+its3ngs3<-"CACCGATGAAGAACGCAG"
+its3ngs4<-"CATCGATGAAGAACGTAG"
+its3ngs5<-"CATCGATGAAGAACGTGG"
+its3ngs10<-"CATCGATGAAGAACGCTG"
+its4ngr<-"TCCTSCGCTTATTGATATGC"
+archits4<-"TCCTCGCCTTATTGATATGC"
+
+# Creating a function called allorientations to identify all potential orientations of the primers. Then use the complement, reverse, and reverseComplement functions to store all possible orientations of the primer in the orientations object). Last, use the sapply function to convert all orientations into individual strings of text. 
+
+allorientations<-function(primer){       
+  require(Biostrings)     
+  dna<-DNAString(primer)                                                    
+  orientations<-c(Forward=dna, Complement=Biostrings::complement(dna),Reverse=Biostrings::reverse(dna), 
+             RevComp=Biostrings::reverseComplement(dna)) 
+  return(sapply(orientations,toString))
+}
+
+# Storing all possible orientations of primers in objects for each primer.
+its3ngs1.ori<-allorientations(its3ngs1)
+its3ngs2.ori<-allorientations(its3ngs2)
+its3ngs3.ori<-allorientations(its3ngs3)
+its3ngs4.ori<-allorientations(its3ngs4)
+its3ngs5.ori<-allorientations(its3ngs5)
+its3ngs10.ori<-allorientations(its3ngs10)
+its4ngr.ori<-allorientations(its4ngr)
+archits4.ori<-allorientations(archits4)
+
+# Identifying occurrences of the primers by creating a function called primeroccurences.This function will use the vcountPattern function which will return a vector containing the number of times a particular primer is detected in a sequence and the readFastq function which will take all fastq files in a particular director and turn them into a single object.  
+primeroccurences<-function(primer, directory) { 
+  nhits<-vcountPattern(primer, sread(readFastq(directory)),fixed=FALSE) 
+  return(sum(nhits>0))
+}
+
+# Using the sapply function to apply the primeroccurencesfunction to the directories that contain the forward and reverse reads.The rbind function creates a table for each combination of primer and forward and reverse reads. 
+primertable_its_phloem<-
+  rbind(its3ngs1.forwardreads_its_phloem=sapply(its3ngs1.ori,primeroccurences,directory=forward.filtN_its_phloem),
+      its3ngs1.reversereads_its_phloem=sapply(its3ngs1.ori,primeroccurences,directory=reverse.filtN_its_phloem),
+      its3ngs2.forwardreads_its_phloem=sapply(its3ngs2.ori,primeroccurences,directory=forward.filtN_its_phloem),
+      its3ngs2.reversereads_its_phloem=sapply(its3ngs2.ori,primeroccurences,directory=reverse.filtN_its_phloem),
+      its3ngs3.forwardreads_its_phloem=sapply(its3ngs3.ori,primeroccurences,directory=forward.filtN_its_phloem),
+      its3ngs3.reversereads_its_phloem=sapply(its3ngs3.ori,primeroccurences,directory=reverse.filtN_its_phloem),
+      its3ngs4.forwardreads_its_phloem=sapply(its3ngs4.ori,primeroccurences,directory=forward.filtN_its_phloem),
+      its3ngs4.reversereads_its_phloem=sapply(its3ngs4.ori,primeroccurences,directory=reverse.filtN_its_phloem),
+      its3ngs5.forwardreads_its_phloem=sapply(its3ngs5.ori,primeroccurences,directory=forward.filtN_its_phloem),
+      its3ngs5.reversereads_its_phloem=sapply(its3ngs5.ori,primeroccurences,directory=reverse.filtN_its_phloem),
+      its3ngs10.forwardreads_its_phloem=sapply(its3ngs10.ori,primeroccurences,directory=forward.filtN_its_phloem),
+      its3ngs10.reversereads_its_phloem=sapply(its3ngs10.ori,primeroccurences,directory=reverse.filtN_its_phloem),
+      its4ngr.forwardreads_its_phloem=sapply(its4ngr.ori,primeroccurences,directory=forward.filtN_its_phloem),
+      its4ngr.reversereads_its_phloem=sapply(its4ngr.ori,primeroccurences,directory=reverse.filtN_its_phloem),
+      archits4.forwardreads_its_phloem=sapply(archits4.ori,primeroccurences,directory=forward.filtN_its_phloem),
+      archits4.reversereads_its_phloem=sapply(archits4.ori,primeroccurences,directory=reverse.filtN_its_phloem))
+primertable_its_phloem
+
+# Creating a directory to store the forward and reverse reads after they have been trimmed. 
+path.cut<-file.path(phloem_its_path,"cutadapt")
+if(!dir.exists(path.cut)) dir.create(path.cut)
+
+forwardreads.cut_its_phloem<-file.path(path.cut,basename(forwardreads_its_phloem))
+reversereads.cut_its_phloem<-file.path(path.cut,basename(reversereads_its_phloem))
+
+# Creating objects containing the forward and reverse primer reverse compliment strings.The rc function takes a sequence object provided by the user and creates the reverse compliment of the sequence. 
+
+its3ngs1.rc1<-dada2::rc(its3ngs1)
+its3ngs2.rc1<-dada2::rc(its3ngs2)
+its3ngs3.rc1<-dada2::rc(its3ngs3)
+its3ngs4.rc1<-dada2::rc(its3ngs4)
+its3ngs5.rc1<-dada2::rc(its3ngs5)
+its3ngs10.rc1<-dada2::rc(its3ngs10)
+its4ngr.rc1<-dada2::rc(its4ngr)
+archits4.rc1<-dada2::rc(archits4)
+
+# Using the paste function we then create objects that contain the flags for the potential combinations of each forward and reverse primer and the reverse compliment. These flags will serve as the argumentst that we provide to cutadapt. The ^ at the beginning of the sequence indicates that the primer should be removed from the beginning of the sequence. 
+
+its3ngs1.its4.r1.flags<-paste("-a"," ", "^", its3ngs1,"...",its4ngr.rc1, sep='') 
+its3ngs1.arch.r1.flags<-paste("-a"," ", "^", its3ngs1,"...",archits4.rc1, sep='') 
+its3ngs2.its4.r1.flags<-paste("-a"," ", "^", its3ngs2,"...",its4ngr.rc1, sep='') 
+its3ngs2.arch.r1.flags<-paste("-a"," ", "^", its3ngs2,"...",archits4.rc1, sep='') 
+its3ngs3.its4.r1.flags<-paste("-a"," ", "^", its3ngs3,"...",its4ngr.rc1, sep='') 
+its3ngs3.arch.r1.flags<-paste("-a"," ", "^", its3ngs3,"...",archits4.rc1, sep='')
+its3ngs4.its4.r1.flags<-paste("-a"," ", "^", its3ngs4,"...",its4ngr.rc1, sep='') 
+its3ngs4.arch.r1.flags<-paste("-a"," ", "^", its3ngs4,"...",archits4.rc1, sep='')
+its3ngs5.its4.r1.flags<-paste("-a"," ", "^", its3ngs5,"...",its4ngr.rc1, sep='') 
+its3ngs5.arch.r1.flags<-paste("-a"," ", "^", its3ngs5,"...",archits4.rc1, sep='')
+its3ngs10.its4.r1.flags<-paste("-a"," ", "^", its3ngs10,"...",its4ngr.rc1, sep='') 
+its3ngs10.arch.r1.flags<-paste("-a"," ", "^", its3ngs10,"...",archits4.rc1, sep='')
+
+its4.its3ngs1.r2.flags<-paste("-A"," ", "^", its4ngr,"...",its3ngs1.rc1, sep='') 
+arch.its3ngs1.r2.flags<-paste("-A"," ", "^", archits4,"...",its3ngs1.rc1, sep='') 
+its4.its3ngs2.r2.flags<-paste("-A"," ", "^", its4ngr,"...",its3ngs2.rc1, sep='') 
+arch.its3ngs2.r2.flags<-paste("-A"," ", "^", archits4,"...",its3ngs2.rc1, sep='') 
+its4.its3ngs3.r2.flags<-paste("-A"," ", "^", its4ngr,"...",its3ngs3.rc1, sep='') 
+arch.its3ngs3.r2.flags<-paste("-A"," ", "^", archits4,"...",its3ngs3.rc1, sep='') 
+its4.its3ngs4.r2.flags<-paste("-A"," ", "^", its4ngr,"...",its3ngs4.rc1, sep='') 
+arch.its3ngs4.r2.flags<-paste("-A"," ", "^", archits4,"...",its3ngs4.rc1, sep='') 
+its4.its3ngs5.r2.flags<-paste("-A"," ", "^", its4ngr,"...",its3ngs5.rc1, sep='') 
+arch.its3ngs5.r2.flags<-paste("-A"," ", "^", archits4,"...",its3ngs5.rc1, sep='') 
+its4.its3ngs10.r2.flags<-paste("-A"," ", "^", its4ngr,"...",its3ngs10.rc1, sep='') 
+arch.its3ngs10.r2.flags<-paste("-A"," ", "^", archits4,"...",its3ngs10.rc1, sep='') 
+
+# Specifying the conda environment to use for cutadapt
+use_condaenv(condaenv="/Users/aarononfurak/anaconda3/envs/cutadaptenv/bin/python")
+
+# Using cutadapt to remove the primers from each read.
+for (i in seq_along(forwardreads_its_phloem)){
+  system2("conda",args=c("run -n cutadaptenv cutadapt",
+                          its3ngs1.its4.r1.flags,
+                          its3ngs1.arch.r1.flags,
+                          its3ngs2.its4.r1.flags,
+                          its3ngs2.arch.r1.flags,
+                          its3ngs3.its4.r1.flags,
+                          its3ngs3.arch.r1.flags,
+                          its3ngs4.its4.r1.flags,
+                          its3ngs4.arch.r1.flags,
+                          its3ngs5.its4.r1.flags,
+                          its3ngs5.arch.r1.flags,
+                          its3ngs10.its4.r1.flags,
+                          its3ngs10.arch.r1.flags,
+                          its4.its3ngs1.r2.flags,
+                          arch.its3ngs1.r2.flags,
+                          its4.its3ngs2.r2.flags,
+                          arch.its3ngs2.r2.flags,
+                          its4.its3ngs3.r2.flags,
+                          arch.its3ngs3.r2.flags,
+                          its4.its3ngs4.r2.flags,
+                          arch.its3ngs4.r2.flags,
+                          its4.its3ngs5.r2.flags,
+                          arch.its3ngs5.r2.flags,
+                          its4.its3ngs10.r2.flags,
+                          arch.its3ngs10.r2.flags,
+                          "--discard-untrimmed","--minimum-length",10,"--report=minimal",
+                          "-o",forwardreads.cut_its_phloem[i], "-p",reversereads.cut_its_phloem[i],
+                          forward.filtN_its_phloem[i],reverse.filtN_its_phloem[i]))
+}
+
+# Evaluting the efficacy of primer removal with cutadapt using the primeroccurrences function.
+primertable_its_phloem_2<-
+  rbind(its3ngs1.forwaredreads.cut_its_phloem=sapply(its3ngs1.ori,primeroccurences,directory=forwardreads.cut_its_phloem),
+      its3ngs1.reversereads.cut_its_phloem=sapply(its3ngs1.ori,primeroccurences,directory=reversereads.cut_its_phloem),
+      its3ngs2.forwaredreads.cut_its_phloem=sapply(its3ngs2.ori,primeroccurences,directory=forwardreads.cut_its_phloem),
+      its3ngs2.reversereads.cut_its_phloem=sapply(its3ngs2.ori,primeroccurences,directory=reversereads.cut_its_phloem),
+      its3ngs3.forwaredreads.cut_its_phloem=sapply(its3ngs3.ori,primeroccurences,directory=forwardreads.cut_its_phloem),
+      its3ngs3.reversereads.cut_its_phloem=sapply(its3ngs3.ori,primeroccurences,directory=reversereads.cut_its_phloem),
+      its3ngs4.forwaredreads.cut_its_phloem=sapply(its3ngs4.ori,primeroccurences,directory=forwardreads.cut_its_phloem),
+      its3ngs4.reversereads.cut_its_phloem=sapply(its3ngs4.ori,primeroccurences,directory=reversereads.cut_its_phloem),
+      its3ngs5.forwaredreads.cut_its_phloem=sapply(its3ngs5.ori,primeroccurences,directory=forwardreads.cut_its_phloem),
+      its3ngs5.reversereads.cut_its_phloem=sapply(its3ngs5.ori,primeroccurences,directory=reversereads.cut_its_phloem),
+      its3ngs10.forwaredreads.cut_its_phloem=sapply(its3ngs10.ori,primeroccurences,directory=forwardreads.cut_its_phloem),
+      its3ngs10.reversereads.cut_its_phloem=sapply(its3ngs10.ori,primeroccurences,directory=reversereads.cut_its_phloem),
+      its4ngr.forwaredreads.cut_its_phloem=sapply(its4ngr.ori,primeroccurences,directory=forwardreads.cut_its_phloem),
+      its4ngr.reversereads.cut_its_phloem=sapply(its4ngr.ori,primeroccurences,directory=reversereads.cut_its_phloem),
+      archits4.forwaredreads.cut_its_phloem=sapply(archits4.ori,primeroccurences,directory=forwardreads.cut_its_phloem),
+      archits4.reversereads.cut_its_phloem=sapply(archits4.ori,primeroccurences,directory=reversereads.cut_its_phloem))
+primertable_its_phloem_2
+
+# Comparing the pre vs post primer detections.
+primertable_its_phloem
+primertable_its_phloem_2
+```
+
+
+# **Step 5: Quality Filtering**
+
+Quality filtering data prior to denoising with dada2. Generating quality plots for the sequences that have had their primers removed and use these quality plots to determine what parameters should be used to filter sequences. 
+
+```{r}
+# Creating new pathways for the quality filtered forward and reverse reads. 
+filtforward_its_phloem<-file.path(phloem_its_path, "filtered", paste0(samplenames_its_phloem,"_F_filt.fastq.gz"))
+filtreverse_its_phloem<-file.path(phloem_its_path,"filtered",paste0(samplenames_its_phloem,"_R_filt.fastq.gz"))
+
+# Removing paths to non-existent negative control samples that lost all reads following initial quality filtering. 
+forwardreads.cut_its_phloem_for_qual<-forwardreads.cut_its_phloem[grep("NTC|negative",forwardreads.cut_its_phloem,invert = TRUE)]
+reversereads.cut_its_phloem_for_qual<-reversereads.cut_its_phloem[grep("NTC|negative",reversereads.cut_its_phloem,invert = TRUE)]
+
+# Creating quality plot profiles for the primer trimmed forward and reverse reads. 
+primercut_qualplot_fwd_its_phloem<-plotQualityProfile(forwardreads.cut_its_phloem_for_qual, aggregate=TRUE)
+primercut_qualplot_fwd_its_phloem
+primercut_qualplot_rev_its_phloem<-plotQualityProfile(reversereads.cut_its_phloem_for_qual, aggregate=TRUE)
+primercut_qualplot_rev_its_phloem
+
+# Quality filteirng reads using a maximum expected error threshold of 2 for the forward and reverse reads. Based on the quality plots setting trunlen to 200. This will truncate all reads to 200 bp. The output will be two directories containing filtered forward and filtered reverse reads. 
+filter.out_its_phloem<-filterAndTrim(fwd=forwardreads.cut_its_phloem, filt=filtforward_its_phloem, rev=reversereads.cut_its_phloem, filt.rev=filtreverse_its_phloem, maxN=0, maxEE=c(2,2), compress=TRUE,truncLen = 200, multithread = FALSE)
+ 
+# The previous step created an object called filter.out_its_phloem. This object is currently a matrix. Converting this object into a dataframe. 
+filter.out_its_phloem<-as.data.frame(filter.out_its_phloem)
+
+# Determining which sample lost the most number of reads during the filtering process. First creatin a new column that represents the differences between the reads that were fed into the filter and the reads that passed the filter. 
+filter.out_its_phloem$diffs <- filter.out_its_phloem$reads.in-filter.out_its_phloem$reads.out
+
+# Using the order command to sort the dataframe by the new column (diffs) that was created above. 
+filter.out_its_phloem[order(filter.out_its_phloem$reads.out),]
+
+# Removing paths to non-existent negative control samples that lost all reads following initial quality filtering. 
+filtforward_its_phloem_no_missing<-filtforward_its_phloem[grep("NTC|negative",filtforward_its_phloem,invert = TRUE)]
+filtreverse_its_phloem_no_missing<-filtreverse_its_phloem[grep("NTC|negative",filtreverse_its_phloem,invert = TRUE)]
+
+# We then generate quality plots for the forward and reverse reads after quality filtering
+filtered_qualplot_fwd_its_phloem<-plotQualityProfile(filtforward_its_phloem_no_missing, aggregate=TRUE)
+filtered_qualplot_fwd_its_phloem
+filtered_qualplot_rev_its_phloem<-plotQualityProfile(filtreverse_its_phloem_no_missing, aggregate=TRUE)
+filtered_qualplot_rev_its_phloem
+```
+
+# **Step 6: Learn Error Rates**
+
+Learning the error rates of the data 
+
+```{r}
+# Learning errors for forward and reverse reads. 
+errorforward_its_phloem<-learnErrors(filtforward_its_phloem_no_missing, multithread = TRUE)
+errorreverse_its_phloem<-learnErrors(filtreverse_its_phloem_no_missing,multithread = TRUE)
+
+# Error plots for forward & reverse reads
+errplots_fwd_its_phloem<-plotErrors(errorforward_its_phloem, nominalQ=TRUE)
+errplots_fwd_its_phloem
+errplots_rev_its_phloem<-plotErrors(errorreverse_its_phloem,nominalQ = TRUE)
+errplots_rev_its_phloem
+
+```
+
+# **Step 7: Dereplication**
+
+Dereplicating reads
+
+```{r}
+# dereplication(merging identical reads into single sequences)
+derepforward_its_phloem<-derepFastq(filtforward_its_phloem_no_missing,verbose=TRUE)
+derepreverse_its_phloem<-derepFastq(filtreverse_its_phloem_no_missing,verbose=TRUE)
+
+# Assigning the sample names to the dereplicated sequence objects
+names(derepforward_its_phloem)<-samplenames_its_phloem[grep("AMP|negative",samplenames_its_phloem,invert = TRUE)]
+names(derepreverse_its_phloem)<-samplenames_its_phloem[grep("AMP|negative",samplenames_its_phloem,invert = TRUE)]
+```
+
+# **Step 8: Denoising with DADA2**
+
+Now that reads have been quality filtered, error rates have been learned, and reads are dereplicated, proceeding to the sequence inference step of the dada2 pipeline.
+
+```{r, results="hide"}
+#denoise with dada2
+dadaforwardreads_its_phloem<-dada(derepforward_its_phloem,err=errorforward_its_phloem,multithread = TRUE,pool=TRUE)
+dadareversereads_its_phloem<-dada(derepreverse_its_phloem,err=errorreverse_its_phloem,multithread = TRUE,pool=TRUE)
+```
+
+# **Step 9: Merge Reads and Chimera Removal**
+
+Merging reads and removing chimeric sequences
+
+```{r, results="hide"}
+# First forward and reverse reads are merged using mergePairs. 
+merge_its_phloem<-mergePairs(dadaforwardreads_its_phloem,filtforward_its_phloem_no_missing,dadareversereads_its_phloem,filtreverse_its_phloem_no_missing,verbose=TRUE)
+
+# I then create a sequence table
+seqtab_its_phloem<-makeSequenceTable(merge_its_phloem)
+hist(nchar(colnames(seqtab_its_phloem)))
+
+# I then remove chimeras using the removeBimeraDenovo function.
+seqtab.nochim_its_phloem<-removeBimeraDenovo(seqtab_its_phloem,method="consensus", multithread=TRUE, verbose=TRUE)
+
+#Number of ASVs in the study
+ncol((seqtab.nochim_its_phloem))
+nrow(seqtab.nochim_its_phloem)
+
+#Number of sequences
+sum(seqtab.nochim_its_phloem)
+```
+
+# **Step 10: Taxonomy Assignment**
+
+Assiging taxonomy to sequences from the [UNITE database](https://unite.ut.ee/repository.php) using a modified UNITE database fasta file that includes the ITS2 sequence of *Juglans nigra* [accession MF182372.1](https://www.ncbi.nlm.nih.gov/nuccore/MF182372.1/).
+
+```{r}
+# Assigning taxonomy using the assignTaxonomy function.
+taxa_its_phloem<-assignTaxonomy(seqtab.nochim_its_phloem,"/Volumes/control_experiments/phosphojet_and_rootshield_experiments_summer_2020/nursery_summer_2020/phloem_fungi_ornl_jnigrarnaseq_su20_ajo_v2/sh_general_release_dynamic_25.07.2023_dev.fasta",multithread = TRUE, minBoot=80)
+
+# Converting the taxonomy assignments to data frame so we can filter the taxonomic assignments.
+taxa.original_its_phloem<-as.data.frame(taxa_its_phloem)
+
+# Selecting only ASVs assigned to a fungal kingdom
+taxa.no.plant<-taxa.original_its_phloem[grep("Fungi",taxa.original_its_phloem$Kingdom,invert=FALSE),]
+
+# Filtering out ASVs assigned to a fungal phyla
+taxa.na.omit_its_phloem<-taxa.no.plant[-(which(is.na(taxa.no.plant$Phylum))),]
+
+```
+
+# **Step 11: Taxonomy Merging and ASV Filtering**
+
+The last step is to filter the ASV abundance table by merging the ASV table with the taxonomy assignments. This will remove ASVs from the count table that were not assigned to a fungal phyla or were identified as plant sequences. 
+
+```{r}
+# Transposing the ASV table so that taxonomy can be added. 
+t.seqtab.nochim_its_phloem<-t(seqtab.nochim_its_phloem)
+
+# Merging the two tables together based on row name. 
+t.seqtab.nochim.filt_its_phloem<-t.seqtab.nochim_its_phloem[row.names(t.seqtab.nochim_its_phloem)%in%row.names(taxa.na.omit_its_phloem),]
+
+# Number of ASVs & number of sequences post-filtering
+nrow(t.seqtab.nochim.filt_its_phloem)
+sum(t.seqtab.nochim.filt_its_phloem)
+
+# Merging taxonomy information into ASV table
+t.seqtab.tax_its_phloem<-merge(t.seqtab.nochim.filt_its_phloem,taxa.na.omit_its_phloem, by="row.names")
+
+sort(colSums(t.seqtab.nochim.filt_its_phloem))
+
+
+# Creating ASV labels and make these new row names.
+asvnumber_its_phloem<-as.character(c(1:nrow(t.seqtab.nochim.filt_its_phloem)))
+asvnumber_its_phloem<-paste("asv_its",labels(asvnumber_its_phloem))
+
+row.names(t.seqtab.tax_its_phloem)<-NULL
+row.names(t.seqtab.tax_its_phloem)<-asvnumber_its_phloem
+
+# Pulling out ASV's that are geosmithia
+geosmithia.seqs.table<-t.seqtab.tax_its_phloem[grep("Geosmithia",t.seqtab.tax_its_phloem$Genus),]
+
+# Pulling out ASV labels and sequences
+geosmithia.seqs<-geosmithia.seqs.table[,1,drop=FALSE]
+
+# Converting the table to a vector object where the ASV names are assigned to the appropriate sequence.
+geosmithia.seqs.fmt<-setNames(geosmithia.seqs$Row.names,row.names(geosmithia.seqs))
+
+# Converting to DNA string set for export as a fasta. 
+geosmithia.seqs.string.set<-Biostrings::DNAStringSet(geosmithia.seqs.fmt)
+
+Biostrings::writeXStringSet(geosmithia.seqs.string.set,"~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/geosmithia.asvs.fa")
+
+write.table(t.seqtab.tax_its_phloem,"~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/feb_22_2024.t.seqtab.tax_its_phloem_manuscript_version.txt",col.names=TRUE,sep='\t',row.names=TRUE)
+
+save.image("~/Google Drive/My Drive/utk_project/phospho_jet_rootshield_manuscript/manuscript_versions/manuscript_v01/analyses/r_sequence_processing_data/feb_22_2024_its_phloem_sequence_processing_manuscript_version.RData")
+```
+
