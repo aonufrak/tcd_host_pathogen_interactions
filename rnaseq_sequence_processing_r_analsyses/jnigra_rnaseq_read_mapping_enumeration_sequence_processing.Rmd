@@ -1,0 +1,275 @@
+---
+title: "06_12_2024_deseq_analyses_juglans_nigra_phloem"
+output: rmdformats::downcute
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# **Introduction** 
+
+## **Background**
+Thousand cankers disease (TCD) is caused by the fungal pathogen *Geosmithia morbida* and its insect vector *Pityophthorous juglandis* (walnut twig beetle; WTB). The most susceptible TCD host is *Juglans nigra* (eastern black walnut) an important timber and nut crop native to  portions of the eastern and midwestern U.S. TCD has been detected in 15 U.S. states and portions of Italy.
+
+At this time, the effects of *G. morbida* infection on the  *J. nigra* microbiome are not well understood. Therefore, the **objective of this study was to examine  the effects of *G.moribida* infection on the *J. nigra* phloem microbial communities**. **We expected that the fungal communities associated with *J. nigra* phloem tissues would shift in response to G. morbida infection**. 
+
+
+## **Study Design**
+In the nursery compound at the University of Tennessee Knoxville trees were treated with the following three treatments with 24 trees per treatment:
+
+1. Water Control
+2. [Phospho-Jet (Phosphorous Acid-based Fungicide, Arborjet)](https://arborjet.com/product/phospho-jet/)
+3. [Rootshield (*Trichoderma afroharzianum* strain T-22, BioWorks)](https://www.bioworksinc.com/rootshield-wp/)
+
+Of the 72 trees, 36 trees were inoculated with the fungal pathogen *Geosmithia morbida* isolate TN17 at four separate, equally spaced locations along the stem. This isolate was chosen because it was originally isolated from black walnut in TN and its genome has been sequenced. The remaining 36 trees were inoculated with a potato dextrose agar (PDA) plug to use as an inoculation control. Inoculations took place 7 days following application of Phospho-Jet, Rootshield, and water treatments. On days 14, 28, and 56 post treatment application, trees were destructively sampled with roots and stem tissues sampled for DNA and RNA extraction. 
+
+## **Sample Processing**
+RNA was extracted from phloem tissues using a CTAB method. Extracted RNA was submitted to Novogene for poly-A enrichment and paired-end sequencing on the Illumina NovaSeq platform (2 x 150 bp). 
+
+# **Sequence Processing Methodology**
+
+# **Step 1: FastQC**
+
+Assessing ready quality using [FastQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/) and [MultiQC](https://multiqc.info/). 
+
+# **Step 2: Adapter Removal and Poly-G Tail Removal**
+
+Removing any adapter contamination and Poly-G tail artifacts using [fastp](https://github.com/OpenGene/fastp). 
+
+## *Script: 01_fastp.sh*
+```{bash,eval=FALSE}
+
+for forward in ../raw_data/*1.fq.gz
+do
+name=`basename $forward|sed 's/_1.fq.gz//'`
+reverse=`basename $forward|sed 's/_1.fq.gz/_2.fq.gz/'`
+echo Trimming files $forward and ../raw_data/$reverse
+fastp\
+ -i $forward\
+ -I ../raw_data/$reverse\
+ -o ../analyses/01_fastp/${name}.r1.fastq\
+ -O ../analyses/01_fastp/${name}.r2.fastq\
+ --adapter_sequence AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTAGATCTCGGTGGTCGCCGTATCATT\
+ --adapter_sequence_r2 GATCGGAAGAGCACACGTCTGAACTCCAGTCACGGATGACTATCTCGTATGCCGTCTTCTGCTTG\
+ -g \
+ -x \
+ -w 16\
+ -j ../analyses/01_fastp/${name}.report
+done
+```
+
+# **Step 3: *Geosmithia morbida* Read Mapping**
+
+In this step I index the *Geosmithia morbida* reference genome and map sample reads to the genome using [STAR](https://github.com/alexdobin/STAR).
+
+## *Script: 02_star_index.sh*
+```{bash,eval=FALSE}
+/pickett_centaur/software/STAR/STAR \
+--genomeSAindexNbases 11 \
+--runThreadN 10 \
+--runMode genomeGenerate \
+--genomeDir /pickett_centaur/project/tcd_control_rnaseq/analyses/2_star/genome_directory_gmorbida \
+--genomeFastaFiles /pickett_centaur/project/tcd_control_rnaseq/raw_data/GCF_012550715.1_ASM1255071v1_genomic.fna \
+--genomeChrBinNbits=10 \
+--sjdbGTFfile /pickett_centaur/project/tcd_control_rnaseq/raw_data/GCF_012550715.1_ASM1255071v1_genomic.gff \
+--sjdbGTFtagExonParentTranscript Parent \
+--sjdbOverhang 149
+```
+
+## *Script: 03_star_mapping.sh*
+```{bash,eval=FALSE}
+for forward in ../analyses/01_fastp/*r1.fastq
+do
+name=`basename $forward|sed 's/r1.fastq//'`
+reverse=`basename $forward|sed 's/r1.fastq/r2.fastq/'`
+echo Mapping files $forward and $reverse
+/pickett_centaur/software/STAR/STAR\
+ --runThreadN 10\
+ --genomeDir /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/genome_directory_gmorbida\
+ --readFilesIn $forward /pickett_centaur/project/tcd_control_rnaseq/analyses/01_fastp/$reverse\
+ --outSAMtype BAM SortedByCoordinate\
+ --outSAMunmapped Within\
+ --outFileNamePrefix ../analyses/02_star/geosmithia_morbida_mapping/${name}geosmithia.
+done
+```
+
+## *Script: star_alignment_final_log_parser.py*
+```{python, eval=FALSE}
+import re
+import sys
+import os.path
+
+summary_file=sys.argv[1]
+with open(summary_file,'r') as summary:
+	with open('star_alignment_parse_summary.txt','a') as parsed_summary:
+		for line in summary.readlines():
+			if re.search('Number of input reads',line):
+				filtered_reads=re.sub('                          Number of input reads \|	','',line)
+			if re.search('Uniquely mapped reads number',line):
+				unique_map_reads=re.sub('                   Uniquely mapped reads number \|	','',line)
+			if re.search('Uniquely mapped reads %',line):
+				percent_unique_map_reads=re.sub('                        Uniquely mapped reads % \|	','',line)
+			if re.search('Number of reads mapped to multiple loci',line):
+				multiple_loci_mapped=re.sub('        Number of reads mapped to multiple loci \|	','',line)
+			if re.search('% of reads mapped to multiple loci',line):
+				percent_multiple_loci=re.sub('             % of reads mapped to multiple loci \|	','',line)
+			if re.search('Number of reads mapped to too many loci',line):
+				number_too_many_loci=re.sub('        Number of reads mapped to too many loci \|	','',line)
+			if re.search('% of reads mapped to too many loci',line):
+				percent_too_many_loci=re.sub('             % of reads mapped to too many loci \|	','',line)
+			if re.search('Number of reads unmapped: too many mismatches',line):
+				number_mismatches=re.sub('  Number of reads unmapped: too many mismatches \|	','',line)
+			if re.search('% of reads unmapped: too many mismatches',line):
+				percent_mismatches=re.sub('       % of reads unmapped: too many mismatches \|	','',line)
+			if re.search('Number of reads unmapped: too short',line):
+				number_short=re.sub('            Number of reads unmapped: too short \|	','',line)
+			if re.search('% of reads unmapped: too short',line):
+				percent_short=re.sub('                 % of reads unmapped: too short \|	','',line)
+			if re.search('Number of reads unmapped: other',line):
+				number_other=re.sub('                Number of reads unmapped: other \|	','',line)
+			if re.search('% of reads unmapped: other',line):
+				percent_other=re.sub('                     % of reads unmapped: other \|	','',line)
+				print(filtered_reads.strip() + '\t' + unique_map_reads.strip() + '\t' +  percent_unique_map_reads.strip()+ '\t' + multiple_loci_mapped.strip()+  '\t' + percent_multiple_loci.strip()+ '\t' + number_too_many_loci.strip() + '\t' + percent_too_many_loci.strip() + '\t' + number_mismatches.strip() + '\t' + percent_mismatches.strip() + '\t' + number_short.strip() + '\t' + percent_short.strip()+ '\t' + number_other.strip() + '\t' + percent_other.strip() +  '\n')
+
+```
+
+
+## *Script: 03.1_star_alignment_log_parser_loop.sh*
+```{bash,eval=FALSE}
+for forward in ../analyses/01_fastp/*r1.fastq
+do
+name=`basename $forward|sed 's/r1.fastq//'`
+reverse=`basename $forward|sed 's/r1.fastq/r2.fastq/'`
+echo Mapping files $forward and $reverse
+/pickett_centaur/software/STAR/STAR\
+ --runThreadN 10\
+ --genomeDir /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/genome_directory_gmorbida\
+ --readFilesIn $forward /pickett_centaur/project/tcd_control_rnaseq/analyses/01_fastp/$reverse\
+ --outSAMtype BAM SortedByCoordinate\
+ --outSAMunmapped Within\
+ --outFileNamePrefix ../analyses/02_star/geosmithia_morbida_mapping/${name}geosmithia.
+done
+```
+
+# **Step 4: Extracting Unmapped Reads**
+
+In this step, I extract the unmapped reads from the BAM files to then be used for mapping to the *Juglans nigra* genome. 
+
+## *Script: 04_gm_unmapped_extraction.sh*
+```{bash,eval=FALSE}
+spack load samtools@1.10%gcc@8.4.1 arch=linux-rhel8-zen
+spack load bedtools2
+for file in /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/geosmithia_morbida_mapping/*.out.bam
+do
+name=`basename $file|sed s'/.geosmithia.Aligned.sortedByCoord.out.bam//'`
+echo $name
+
+samtools view -u -f 4 -F 264 $file > /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.r1.unmap.bam
+samtools view -u -f 8 -F 260 $file > /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.r2.unmap.bam
+samtools view -u -f 12 -F 256 $file > /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.r1r2.unmap.bam
+samtools merge -u /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.unmapped.bam /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.r1.unmap.bam /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.r2.unmap.bam /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.r1r2.unmap.bam
+samtools sort -n /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.unmapped.bam -o /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.unmapped.sorted.bam
+bedtools bamtofastq -i /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/$name.unmapped.sorted.bam -fq /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/${name}.gm.unmapped.1.fastq -fq2 /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/$name.gm.unmapped.2.fastq
+rm /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/*.bam
+
+
+done
+```
+
+
+# **Step 5: *Juglans nigra* Read Mapping**
+
+In this step, I index the *Juglans nigra* reference genome and map sample reads to the genome using [STAR](https://github.com/alexdobin/STAR).
+
+## *Script: 05_star_index_juglans_nigra.sh*
+```{bash,eval=FALSE}
+/pickett_centaur/software/STAR/STAR \
+--genomeSAindexNbases 11 \
+--runThreadN 10 \
+--runMode genomeGenerate \
+--genomeDir /pickett_centaur/project/tcd_control_rnaseq/analyses/2_star/genome_directory_juglans_nigra \
+--genomeFastaFiles /pickett_centaur/project/tcd_control_rnaseq/raw_data/jni1_wg.fa \
+--genomeChrBinNbits=10 \
+--sjdbGTFfile /pickett_centaur/project/tcd_control_rnaseq/raw_data/jni1_wg.gff \
+--sjdbGTFtagExonParentTranscript Parent \
+--sjdbOverhang 149
+```
+
+## *Script: 06_star_mapping_juglans_nigra.sh*
+```{bash,eval=FALSE}
+for forward in /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/*1.fastq
+do
+name=`basename $forward|sed 's/.gm.unmapped.1.fastq//'`
+reverse=`basename $forward|sed 's/.1.fastq/.2.fastq/'`
+echo Mapping files $forward and $reverse
+/pickett_centaur/software/STAR/STAR\
+ --runThreadN 10\
+ --genomeDir /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/genome_directory_juglans_nigra\
+ --readFilesIn $forward /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/gm_unmapped_fastq/$reverse\
+ --outSAMtype BAM SortedByCoordinate\
+ --outSAMunmapped Within\
+ --outFileNamePrefix ../analyses/02_star/juglans_nigra_mapping/${name}.jnigra.
+done
+```
+
+## *Script: 06.2_star_alignment_log_parser_loop_juglans.sh*
+```{bash,eval=FALSE}
+touch /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/juglans_nigra_mapping/star_juglans_alignment_parse_summary.txt
+echo 'Tree Total_Reads Unique_Mapped Percent_Unique Multiple_Loci Percent_Multi_Loci Many_Loci Percent_Many_Loci Many_Mismatches Percent_Many_Mismatches Short Percent_Short Other_Unmapped Percent_Other_Unmapped' >> /pickett_centaur/project/tcd_control_rnaseq/analyses/2_star/juglans_nigra_mapping/star_juglans_alignment_parse_summary.txt
+
+for file in /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/juglans_nigra_mapping/*jnigra.Log.final.out
+do
+base=`basename $file | sed s/.Log.final.out//`
+echo $base 
+seqstats=`python ./star_alignment_final_log_parser.py $file`
+echo $base $seqstats >> /pickett_centaur/project/tcd_control_rnaseq/analyses/02_star/juglans_nigra_mapping/star_juglans_alignment_parse_summary.txt
+done
+```
+
+
+# **Step 6: Read Enumeration**
+
+In this step, I use [HTSEQ](https://htseq.readthedocs.io/en/master/) to count the number of reads assigned to each gene for all samples in both the *Geosmithia morbida* and *Juglans nigra* genomes. 
+
+## *Script: 07_htseq_g.morbida.sh*
+```{bash, eval=FALSE}
+spack load py-htseq@0.11.2%gcc@8.4.1
+for bam in ../analyses/02_star/geosmithia_morbida_mapping/*.out.bam
+do
+name=`basename $bam|sed s'/.Aligned.sortedByCoord.out.bam//g'`
+echo Counting reads $name
+htseq-count\
+ --format=bam\
+ --order=pos\
+ --stranded=no\
+ --type=gene\
+ --idattr=ID\
+ $bam\
+ ../raw_data/GCF_012550715.1_ASM1255071v1_genomic.gff\
+ >../analyses/03_htseq_count/g.morbida_counts/${name}.htseq.counts.txt
+done
+```
+
+## *Script: 08_htseq_j.nigra.sh*
+```{bash, eval=FALSE}
+spack load py-htseq@0.11.2%gcc@8.4.1
+for bam in ../analyses/02_star/juglans_nigra_mapping/*.out.bam
+do
+name=`basename $bam|sed s'/.Aligned.sortedByCoord.out.bam//g'`
+echo Counting reads $name
+htseq-count\
+ --format=bam\
+ --order=pos\
+ --stranded=no\
+ --type=gene\
+ --idattr=ID\
+ $bam\
+ ../raw_data/jni1_wg.gff\
+ >../analyses/03_htseq_count/j.nigra_counts/$name.htseq.counts.txt
+done
+
+```
+
